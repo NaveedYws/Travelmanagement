@@ -20,22 +20,34 @@ export function ImageUpload({ value, onChange, userId }: ImageUploadProps) {
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file");
+      toast.error("Please select a valid image file (PNG, JPG, WEBP, etc.)");
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image must be less than 5MB");
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error("Image file is too large (max 25MB)");
       return;
     }
 
     setUploading(true);
+    const originalKb = (file.size / 1024).toFixed(0);
+    const toastId = toast.loading(
+      file.size > 500 * 1024
+        ? `Compressing image (${originalKb} KB → <500 KB)...`
+        : "Uploading image..."
+    );
+
     try {
       const data = await api.upload(file);
       onChange(data.publicUrl);
-      toast.success("Image uploaded!");
+      toast.success(
+        file.size > 500 * 1024
+          ? `Image compressed to <500 KB & uploaded!`
+          : "Image uploaded!",
+        { id: toastId }
+      );
     } catch (err: any) {
-      toast.error(err.message || "Upload failed");
+      toast.error(err.message || "Upload failed", { id: toastId });
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -45,29 +57,45 @@ export function ImageUpload({ value, onChange, userId }: ImageUploadProps) {
   return (
     <div className="space-y-2">
       {value ? (
-        <div className="relative w-full h-32 rounded-lg overflow-hidden border border-border">
+        <div className="relative w-full h-36 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group bg-slate-100 dark:bg-slate-800">
           <img src={value} alt="Preview" className="w-full h-full object-cover" />
-          <button
-            type="button"
-            onClick={() => onChange("")}
-            className="absolute top-1 right-1 bg-background/80 rounded-full p-1 hover:bg-destructive hover:text-destructive-foreground transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="bg-white/90 hover:bg-white text-slate-900 text-xs font-semibold px-3 py-1.5 rounded-lg shadow-sm transition-all"
+            >
+              Change Image
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="bg-red-600 hover:bg-red-700 text-white p-1.5 rounded-lg shadow-sm transition-all"
+              title="Remove image"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       ) : (
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="w-full h-24 border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center gap-1 text-muted-foreground hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
+          className="w-full h-24 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl flex flex-col items-center justify-center gap-1.5 text-slate-500 dark:text-slate-400 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-all disabled:opacity-50 cursor-pointer"
         >
           {uploading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
+            <div className="flex flex-col items-center gap-1">
+              <Loader2 className="w-5 h-5 animate-spin text-blue-600 dark:text-blue-400" />
+              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                Compressing to 500KB & uploading...
+              </span>
+            </div>
           ) : (
             <>
-              <ImagePlus className="w-5 h-5" />
-              <span className="text-xs">Upload Image</span>
+              <ImagePlus className="w-6 h-6 text-blue-500" />
+              <span className="text-xs font-medium">Upload Image</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">Auto-compressed to 500KB</span>
             </>
           )}
         </button>

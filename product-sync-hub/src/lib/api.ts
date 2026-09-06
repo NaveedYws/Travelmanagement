@@ -1,3 +1,5 @@
+import { compressImageTo500KB } from "./imageCompression";
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -35,11 +37,12 @@ export const api = {
   put: <T>(path: string, body: any) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   
-  // Special upload method for multipart form data
-  upload: async (file: File) => {
+  // Special upload method for multipart form data (compresses image to max 500KB)
+  upload: async (file: File, onProgress?: (progress: number) => void) => {
     const token = localStorage.getItem('token');
+    const processedFile = await compressImageTo500KB(file, onProgress);
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('image', processedFile);
 
     const response = await fetch(`${API_URL}/api/upload.php`, {
       method: 'POST',

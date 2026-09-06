@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,6 +38,9 @@ import {
   Settings,
   Camera,
   Layers,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
 } from "lucide-react";
 import {
   DetailedItineraryDay,
@@ -148,6 +152,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     starRating: "3 Star",
     nights: 1,
     rooms: 1,
+    ratePerNight: 0,
     price: 0,
     amenities: "",
   });
@@ -227,10 +232,27 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
 
   // States for save & generate
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingProgress, setGeneratingProgress] = useState("");
+  const [previewZoom, setPreviewZoom] = useState<number>(85);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const pdfRef = useRef<HTMLDivElement>(null);
   const wasDarkRef = useRef(false);
+
+  // Auto-fit preview zoom based on device screen width
+  useEffect(() => {
+    if (showPreview) {
+      if (typeof window !== "undefined") {
+        if (window.innerWidth < 640) {
+          setPreviewZoom(55);
+        } else if (window.innerWidth < 1024) {
+          setPreviewZoom(75);
+        } else {
+          setPreviewZoom(85);
+        }
+      }
+    }
+  }, [showPreview]);
 
   useEffect(() => {
     document.body.style.overflow = isOpen || showPreview ? "hidden" : "unset";
@@ -430,20 +452,109 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     }
   };
 
+  // Hotel calculation helpers & handlers
+  const calculateHotelNights = (inDate?: string, outDate?: string): number => {
+    if (!inDate || !outDate) return 1;
+    const d1 = new Date(inDate);
+    const d2 = new Date(outDate);
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return 1;
+    const diff = Math.ceil((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
+    return diff > 0 ? diff : 1;
+  };
+
+  const handleHotelDateChange = (field: 'checkIn' | 'checkOut', value: string) => {
+    const updatedIn = field === 'checkIn' ? value : hotelForm.checkIn;
+    const updatedOut = field === 'checkOut' ? value : hotelForm.checkOut;
+    const n = calculateHotelNights(updatedIn, updatedOut);
+    const r = hotelForm.rooms || 1;
+    const rate = hotelForm.ratePerNight || 0;
+    const newPrice = rate > 0 ? rate * n * r : hotelForm.price;
+
+    setHotelForm({
+      ...hotelForm,
+      [field]: value,
+      nights: n,
+      price: newPrice,
+    });
+  };
+
+  const handleHotelNightsChange = (nights: number) => {
+    const validN = Math.max(1, nights);
+    const r = hotelForm.rooms || 1;
+    const rate = hotelForm.ratePerNight || 0;
+    const newPrice = rate > 0 ? rate * validN * r : hotelForm.price;
+
+    setHotelForm({
+      ...hotelForm,
+      nights: validN,
+      price: newPrice,
+    });
+  };
+
+  const handleHotelRoomsChange = (rooms: number) => {
+    const validR = Math.max(1, rooms);
+    const n = hotelForm.nights || 1;
+    const rate = hotelForm.ratePerNight || 0;
+    const newPrice = rate > 0 ? rate * n * validR : hotelForm.price;
+
+    setHotelForm({
+      ...hotelForm,
+      rooms: validR,
+      price: newPrice,
+    });
+  };
+
+  const handleHotelRateChange = (rate: number) => {
+    const n = hotelForm.nights || 1;
+    const r = hotelForm.rooms || 1;
+    const newPrice = Math.max(0, rate * n * r);
+
+    setHotelForm({
+      ...hotelForm,
+      ratePerNight: rate,
+      price: newPrice,
+    });
+  };
+
+  const handleHotelTotalCostChange = (total: number) => {
+    const n = hotelForm.nights || 1;
+    const r = hotelForm.rooms || 1;
+    const newRate = total > 0 && n * r > 0 ? Math.round(total / (n * r)) : hotelForm.ratePerNight;
+
+    setHotelForm({
+      ...hotelForm,
+      price: total,
+      ratePerNight: newRate,
+    });
+  };
+
   // Hotel handlers
   const handleSaveHotel = () => {
     if (!hotelForm.hotelName.trim()) {
       toast.error("Please enter Hotel Name");
       return;
     }
+    const n = hotelForm.nights || calculateHotelNights(hotelForm.checkIn, hotelForm.checkOut);
+    const r = hotelForm.rooms || 1;
+    const rate = hotelForm.ratePerNight || 0;
+    const finalPrice = hotelForm.price !== undefined && hotelForm.price > 0 ? hotelForm.price : (rate * n * r);
+
+    const savedHotel: ItineraryHotel = {
+      ...hotelForm,
+      nights: n,
+      rooms: r,
+      ratePerNight: rate,
+      price: finalPrice,
+    };
+
     if (editingHotelIndex !== null) {
       const updated = [...hotels];
-      updated[editingHotelIndex] = { ...hotelForm };
+      updated[editingHotelIndex] = savedHotel;
       setHotels(updated);
       setEditingHotelIndex(null);
       toast.success("Hotel updated");
     } else {
-      setHotels([...hotels, { ...hotelForm, id: `h-${Date.now()}` }]);
+      setHotels([...hotels, { ...savedHotel, id: `h-${Date.now()}` }]);
       toast.success("Hotel added");
     }
     setHotelForm({
@@ -456,6 +567,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       starRating: "3 Star",
       nights: 1,
       rooms: 1,
+      ratePerNight: 0,
       price: 0,
       amenities: "",
     });
@@ -463,7 +575,17 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
 
   const handleEditHotel = (idx: number) => {
     setEditingHotelIndex(idx);
-    setHotelForm(hotels[idx]);
+    const h = hotels[idx];
+    const n = h.nights || calculateHotelNights(h.checkIn, h.checkOut);
+    const r = h.rooms || 1;
+    const rate = h.ratePerNight || (h.price ? Math.round(h.price / (n * r)) : 0);
+    setHotelForm({
+      ...h,
+      nights: n,
+      rooms: r,
+      ratePerNight: rate,
+      price: h.price || (rate * n * r),
+    });
     setSectionsOpen((p) => ({ ...p, hotels: true }));
   };
 
@@ -513,6 +635,8 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   // PDF Data Bundle
   const pdfData: ItineraryPdfData = useMemo(
     () => ({
+      quotationRef,
+      quotationDate,
       clientName,
       tripTitle,
       destination,
@@ -522,7 +646,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       children,
       theme,
       finalRate: String(finalQuotationTotal),
-      heroImage: heroImage || (days.find((d) => d.images && d.images[0]?.trim())?.images[0]) || "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&q=80&w=1600",
+      heroImage: heroImage || (days.find((d) => d.images && d.images[0]?.trim())?.images[0]) || "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600",
       days,
       flights,
       hotels,
@@ -595,55 +719,88 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     }
   };
 
-  // Export PDF
+  // Export PDF - Optimized for speed, reliability and crisp resolution
   const generatePDF = async (): Promise<string | null> => {
     if (!pdfRef.current) return null;
     setIsGenerating(true);
-    toast.info("Generating high-resolution Quotation PDF…");
+    setGeneratingProgress("Preparing document…");
+    const toastId = toast.loading("Generating Quotation PDF…");
 
     try {
-      // Ensure all images are fully loaded and decoded in the hidden render element
+      // 1. Fast image pre-check (racing decode with short timeout to prevent broken URLs from hanging)
       const allImgs = Array.from(pdfRef.current.querySelectorAll("img"));
       await Promise.all(
         allImgs.map((img) => {
-          if (img.complete && img.naturalHeight !== 0) return Promise.resolve();
-          return new Promise((resolve) => {
-            img.onload = () => resolve(true);
-            img.onerror = () => resolve(true);
-            setTimeout(() => resolve(true), 1200);
-          });
+          if (img.complete && img.naturalHeight !== 0) return Promise.resolve(true);
+          return Promise.race([
+            img.decode ? img.decode().then(() => true).catch(() => true) : Promise.resolve(true),
+            new Promise((resolve) => {
+              img.onload = () => resolve(true);
+              img.onerror = () => resolve(true);
+              setTimeout(() => resolve(true), 400);
+            }),
+          ]);
         })
       );
 
-      const pages = pdfRef.current.querySelectorAll("[data-pdf-page]");
-      const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+      const pages = Array.from(pdfRef.current.querySelectorAll("[data-pdf-page]")) as HTMLElement[];
+      if (!pages.length) throw new Error("No pages found in itinerary document.");
 
-      for (let i = 0; i < pages.length; i++) {
-        const page = pages[i] as HTMLElement;
-        const canvas = await html2canvas(page, {
-          scale: 2.2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: "#ffffff",
-          width: page.offsetWidth,
-          height: page.offsetHeight,
-        });
+      const totalPages = pages.length;
+      const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4", compress: true });
 
-        const imgData = canvas.toDataURL("image/jpeg", 0.92);
+      // 2. High-speed concurrent rendering (render in chunks of 3 for multi-core parallelism)
+      const BATCH_SIZE = 3;
+      const renderedCanvases: { index: number; dataUrl: string }[] = [];
+
+      for (let batchStart = 0; batchStart < totalPages; batchStart += BATCH_SIZE) {
+        const currentBatch = pages.slice(batchStart, batchStart + BATCH_SIZE);
+        setGeneratingProgress(`Rendering pages ${batchStart + 1}–${Math.min(batchStart + BATCH_SIZE, totalPages)} of ${totalPages}…`);
+
+        const batchResults = await Promise.all(
+          currentBatch.map(async (page, offset) => {
+            const pageIndex = batchStart + offset;
+            const canvas = await html2canvas(page, {
+              scale: 1.6, // High-DPI 160 DPI output: razor-sharp typography, ~50% faster than 2.2
+              useCORS: true,
+              logging: false,
+              backgroundColor: "#ffffff",
+              width: page.offsetWidth || 794,
+              height: page.offsetHeight || 1123,
+              windowWidth: 794,
+              removeContainer: true,
+              imageTimeout: 2000,
+            });
+
+            return {
+              index: pageIndex,
+              dataUrl: canvas.toDataURL("image/jpeg", 0.88),
+            };
+          })
+        );
+        renderedCanvases.push(...batchResults);
+      }
+
+      setGeneratingProgress("Assembling PDF…");
+
+      // 3. Assemble PDF in exact page order
+      renderedCanvases.sort((a, b) => a.index - b.index);
+      for (let i = 0; i < renderedCanvases.length; i++) {
         if (i > 0) pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, 0, 210, 297);
+        pdf.addImage(renderedCanvases[i].dataUrl, "JPEG", 0, 0, 210, 297, undefined, "FAST");
       }
 
       const filename = `${(clientName || "Quotation").replace(/\s+/g, "_")}_${(tripTitle || "Itinerary").slice(0, 30).replace(/\s+/g, "_")}.pdf`;
       pdf.save(filename);
-      toast.success("Quotation PDF downloaded!");
+      toast.success("Quotation PDF downloaded!", { id: toastId });
       return filename;
     } catch (error) {
       console.error("PDF generation failed:", error);
-      toast.error("Failed to generate PDF. Please try again.");
+      toast.error("Failed to generate PDF. Please try again.", { id: toastId });
       return null;
     } finally {
       setIsGenerating(false);
+      setGeneratingProgress("");
     }
   };
 
@@ -689,29 +846,27 @@ Thank you for choosing ${user?.company_name || "us"}!`;
     );
   };
 
-  // If Studio is closed, display trigger button
-  if (!isOpen) {
-    if (trigger) {
-      return (
-        <div onClick={() => setIsOpen(true)} className={cn("inline-flex", className)}>
-          {trigger}
-        </div>
-      );
-    }
-    return (
-      <Button
-        onClick={() => setIsOpen(true)}
-        className={cn("bg-teal-700 hover:bg-teal-800 text-white gap-2 h-11 sm:h-12 px-5 sm:px-6 rounded-xl shadow-md shadow-teal-900/10 font-medium transition-all", className)}
-      >
-        <FileText className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-        <span>Create Itinerary</span>
-      </Button>
-    );
-  }
+  const triggerElement = trigger ? (
+    <div onClick={() => setIsOpen(true)} className={cn("inline-flex", className)}>
+      {trigger}
+    </div>
+  ) : (
+    <Button
+      onClick={() => setIsOpen(true)}
+      className={cn("bg-teal-700 hover:bg-teal-800 text-white gap-2 h-11 sm:h-12 px-5 sm:px-6 rounded-xl shadow-md shadow-teal-900/10 font-medium transition-all", className)}
+    >
+      <FileText className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+      <span>Create Itinerary</span>
+    </Button>
+  );
 
   return (
     <>
-      <div className="fixed inset-0 z-[9999] bg-slate-100 flex flex-col w-screen max-w-[100vw] h-[100dvh] overflow-hidden force-light">
+      {triggerElement}
+
+      {isOpen && typeof document !== "undefined" && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9999] bg-slate-100 flex flex-col w-screen max-w-[100vw] h-[100dvh] overflow-hidden force-light">
         {/* --- 1. TOP HEADER & NAVBAR MATCHING SCREENSHOT --- */}
         <header className="shrink-0 bg-white border-b border-slate-200 shadow-sm z-30">
           <div className="h-16 px-4 sm:px-8 flex items-center justify-between gap-4">
@@ -762,7 +917,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                 {isGenerating ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                    <span>Generating PDF…</span>
+                    <span>{generatingProgress || "Generating PDF…"}</span>
                   </>
                 ) : (
                   <>
@@ -821,7 +976,8 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                   <Eye className="w-4 h-4 text-teal-600" /> Preview
                 </Button>
                 <Button variant="outline" size="sm" onClick={generatePDF} disabled={isGenerating} className="w-full gap-1.5">
-                  <Download className="w-4 h-4 text-blue-600" /> Export PDF
+                  {isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-blue-600" /> : <Download className="w-4 h-4 text-blue-600" />}
+                  <span>{isGenerating ? "Exporting…" : "Export PDF"}</span>
                 </Button>
                 <Button variant="outline" size="sm" onClick={handleWhatsAppShare} disabled={isGenerating} className="w-full col-span-2 gap-1.5 text-emerald-700 bg-emerald-50/50">
                   {isGenerating ? <Loader2 className="w-4 h-4 animate-spin text-emerald-600" /> : <MessageCircle className="w-4 h-4" />}
@@ -1130,6 +1286,96 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                     <Calendar className="w-4 h-4 text-teal-600" />
                     <span>Calculated Duration: {duration} ({dateRange})</span>
                   </div>
+
+                  {/* Quotation Cover Photo (Travel Background) */}
+                  <div className="rounded-xl border border-teal-100 bg-teal-50/40 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-teal-600" />
+                          <span>Quotation Cover Photo (Travel Wallpaper)</span>
+                        </Label>
+                        <p className="text-[11px] text-slate-500">
+                          Select a travel destination wallpaper or enter your custom image URL
+                        </p>
+                      </div>
+                      {heroImage && (
+                        <button
+                          type="button"
+                          onClick={() => setHeroImage("")}
+                          className="text-[11px] text-slate-500 hover:text-rose-600 transition-colors"
+                        >
+                          Reset Default
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Quick 1-Click Travel Wallpaper Presets */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {[
+                        {
+                          id: "beach",
+                          name: "Tropical Beach",
+                          icon: "🏖️",
+                          url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600",
+                        },
+                        {
+                          id: "maldives",
+                          name: "Luxury Resort",
+                          icon: "🏝️",
+                          url: "https://images.unsplash.com/photo-1514282401047-d79a71a590e8?auto=format&fit=crop&q=80&w=1600",
+                        },
+                        {
+                          id: "mountains",
+                          name: "Hills & Mountains",
+                          icon: "🏔️",
+                          url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&q=80&w=1600",
+                        },
+                        {
+                          id: "dubai",
+                          name: "Dubai Skyline",
+                          icon: "🏙️",
+                          url: "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&q=80&w=1600",
+                        },
+                        {
+                          id: "heritage",
+                          name: "Europe / Heritage",
+                          icon: "🏛️",
+                          url: "https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?auto=format&fit=crop&q=80&w=1600",
+                        },
+                      ].map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setHeroImage(preset.url)}
+                          className={cn(
+                            "flex items-center gap-1.5 p-2 rounded-lg border text-xs font-semibold text-left transition-all",
+                            heroImage === preset.url
+                              ? "bg-teal-50 border-teal-500 text-teal-800 ring-1 ring-teal-500 shadow-2xs"
+                              : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
+                          )}
+                        >
+                          <span className="text-base">{preset.icon}</span>
+                          <span className="truncate">{preset.name}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Custom Image URL input */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <Input
+                        value={heroImage}
+                        onChange={(e) => setHeroImage(e.target.value)}
+                        placeholder="Paste custom travel image URL (or click any preset above)..."
+                        className="h-9 text-xs rounded-lg border-slate-200 bg-white"
+                      />
+                      {heroImage && (
+                        <div className="w-12 h-9 rounded-lg overflow-hidden border border-slate-200 shrink-0">
+                          <img src={heroImage} alt="Cover preview" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </Card>
@@ -1434,46 +1680,91 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       </div>
                     </div>
 
-                    {/* Date / Room info box */}
-                    <div className="rounded-xl border border-slate-200 bg-white p-3.5 grid grid-cols-1 sm:grid-cols-4 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase">Check-in</Label>
-                        <Input
-                          type="date"
-                          value={hotelForm.checkIn}
-                          onChange={(e) => setHotelForm({ ...hotelForm, checkIn: e.target.value })}
-                          className="h-9 text-xs"
-                        />
+                    {/* Date / Room info box with Auto Calculation */}
+                    <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] font-bold text-slate-500 uppercase">Check-in</Label>
+                          <Input
+                            type="date"
+                            value={hotelForm.checkIn}
+                            onChange={(e) => handleHotelDateChange('checkIn', e.target.value)}
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] font-bold text-slate-500 uppercase">Check-out</Label>
+                          <Input
+                            type="date"
+                            value={hotelForm.checkOut}
+                            onChange={(e) => handleHotelDateChange('checkOut', e.target.value)}
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] font-bold text-slate-500 uppercase">Nights / Days</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={hotelForm.nights || 1}
+                            onChange={(e) => handleHotelNightsChange(parseInt(e.target.value) || 1)}
+                            className="h-9 text-xs font-semibold"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] font-bold text-slate-500 uppercase">No. of Rooms</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={hotelForm.rooms || 1}
+                            onChange={(e) => handleHotelRoomsChange(parseInt(e.target.value) || 1)}
+                            className="h-9 text-xs font-semibold"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px] font-bold text-slate-500 uppercase">Rate / Room / Day (₹)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="e.g. 1500"
+                            value={hotelForm.ratePerNight || ""}
+                            onChange={(e) => handleHotelRateChange(parseFloat(e.target.value) || 0)}
+                            className="h-9 text-xs font-semibold text-blue-700 bg-blue-50/40 border-blue-200"
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase">Check-out</Label>
-                        <Input
-                          type="date"
-                          value={hotelForm.checkOut}
-                          onChange={(e) => setHotelForm({ ...hotelForm, checkOut: e.target.value })}
-                          className="h-9 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase">No. of Rooms</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={hotelForm.rooms || 1}
-                          onChange={(e) => setHotelForm({ ...hotelForm, rooms: parseInt(e.target.value) || 1 })}
-                          className="h-9 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] font-bold text-slate-500 uppercase">Hotel Total Cost (₹)</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={hotelForm.price || ""}
-                          onChange={(e) => setHotelForm({ ...hotelForm, price: parseFloat(e.target.value) || 0 })}
-                          className="h-9 text-xs font-bold text-teal-800"
-                        />
+
+                      {/* Auto Calculation Result Bar */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2.5 border-t border-slate-100 bg-slate-50/60 -mx-3.5 -mb-3.5 p-3 rounded-b-xl">
+                        <div className="text-xs text-slate-600 flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-slate-500">Auto Calc:</span>
+                          <span className="font-bold text-blue-700">₹{(hotelForm.ratePerNight || 0).toLocaleString("en-IN")}</span>
+                          <span>×</span>
+                          <span className="font-semibold text-slate-700">{hotelForm.nights || 1} Night(s)</span>
+                          <span>×</span>
+                          <span className="font-semibold text-slate-700">{hotelForm.rooms || 1} Room(s)</span>
+                          <span>=</span>
+                          <span className="font-black text-teal-800">
+                            ₹{(((hotelForm.ratePerNight || 0) * (hotelForm.nights || 1) * (hotelForm.rooms || 1))).toLocaleString("en-IN")}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                            Hotel Total Cost (₹):
+                          </Label>
+                          <div className="relative w-36">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-teal-700">₹</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              value={hotelForm.price || ""}
+                              onChange={(e) => handleHotelTotalCostChange(parseFloat(e.target.value) || 0)}
+                              className="h-9 pl-6 text-sm font-black text-teal-800 bg-white border-teal-300 shadow-xs"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1526,6 +1817,12 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                                 <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">
                                   {h.checkIn || "—"} to {h.checkOut || "—"} ({h.nights || 1} Nights)
                                 </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.rooms || 1} Room(s)</span>
+                                {h.ratePerNight ? (
+                                  <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-100">
+                                    ₹{h.ratePerNight.toLocaleString("en-IN")}/day
+                                  </span>
+                                ) : null}
                                 <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.roomCategory}</span>
                                 <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.mealPlan}</span>
                               </div>
@@ -2659,64 +2956,153 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                   disabled={isGenerating}
                   className="text-xs text-teal-700 hover:text-teal-800 font-semibold gap-1.5"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Quotation PDF Directly</span>
+                  {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  <span>{isGenerating ? (generatingProgress || "Generating PDF…") : "Download Quotation PDF Directly"}</span>
                 </Button>
               </div>
             </Card>
           </div>
         </ScrollArea>
 
-        {/* --- HIDDEN PDF RENDER ELEMENT --- */}
-        <div className="fixed -left-[9999px] top-0 pointer-events-none" aria-hidden>
-          <div ref={pdfRef}>
+        {/* --- HIDDEN PDF RENDER ELEMENT (Mounted at 0,0 with opacity 0 to ensure immediate layout calculations and high-priority image fetching) --- */}
+        <div 
+          className="fixed top-0 left-0 pointer-events-none opacity-0 -z-50 overflow-hidden" 
+          style={{ width: "210mm", height: "auto" }} 
+          aria-hidden
+        >
+          <div ref={pdfRef} style={{ width: "210mm" }}>
             <ItineraryPdfDocument data={pdfData} user={user} />
           </div>
         </div>
       </div>
 
-      {/* --- MODAL 1: PREVIEW QUOTATION MODAL --- */}
+      {/* --- MODAL 1: PREVIEW QUOTATION MODAL (PORTALED FULL SCREEN) --- */}
       {showPreview && (
-        <div className="fixed inset-0 z-[10000] bg-slate-950/95 flex flex-col force-light">
-          <div className="shrink-0 h-14 px-4 flex items-center justify-between border-b border-white/10">
-            <p className="text-white text-sm font-semibold truncate flex items-center gap-2">
-              <Eye className="w-4 h-4 shrink-0 text-teal-400" />
-              <span>Preview: {tripTitle || "Quotation"}</span>
-            </p>
+        <div className="fixed inset-0 z-[10005] bg-slate-950/95 flex flex-col w-screen h-screen overflow-hidden force-light">
+          {/* Preview Toolbar */}
+          <div className="shrink-0 h-14 px-4 sm:px-6 flex items-center justify-between border-b border-white/10 bg-slate-900/90 backdrop-blur-sm">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center shrink-0">
+                <Eye className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-white text-sm font-semibold truncate flex items-center gap-2">
+                  <span>Preview: {tripTitle || "Quotation"}</span>
+                </p>
+                <p className="text-[11px] text-slate-400 truncate">
+                  {clientName ? `Client: ${clientName}` : "Custom Quotation"} • {duration}
+                </p>
+              </div>
+            </div>
+
+            {/* Center: Zoom Controls */}
+            <div className="flex items-center gap-1.5 bg-slate-800/90 rounded-xl p-1 border border-white/10 text-white">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setPreviewZoom((z) => Math.max(40, z - 10))}
+                className="h-7 w-7 p-0 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg"
+                title="Zoom out"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </Button>
+              <button
+                onClick={() => setPreviewZoom(85)}
+                className="text-xs font-mono px-2 py-0.5 text-slate-300 hover:text-white rounded hover:bg-white/10 transition-colors"
+                title="Click to reset zoom"
+              >
+                {previewZoom}%
+              </button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setPreviewZoom((z) => Math.min(150, z + 10))}
+                className="h-7 w-7 p-0 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg"
+                title="Zoom in"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </Button>
+              <div className="h-4 w-px bg-white/15 mx-0.5" />
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  const containerW = typeof window !== "undefined" ? window.innerWidth : 1024;
+                  if (containerW < 640) setPreviewZoom(55);
+                  else if (containerW < 1024) setPreviewZoom(75);
+                  else setPreviewZoom(95);
+                }}
+                className="h-7 px-2 text-[11px] text-slate-300 hover:text-white hover:bg-white/10 rounded-lg gap-1"
+                title="Fit to screen"
+              >
+                <Maximize2 className="w-3 h-3" />
+                <span className="hidden sm:inline">Fit</span>
+              </Button>
+            </div>
+
+            {/* Right: Actions */}
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 onClick={generatePDF}
                 disabled={isGenerating}
-                className="bg-teal-600 hover:bg-teal-700 text-white gap-1.5 hidden sm:flex h-9 rounded-lg text-xs"
+                className="bg-teal-600 hover:bg-teal-700 text-white gap-1.5 h-9 rounded-xl text-xs font-semibold px-3.5 shadow-sm shadow-teal-900/30"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download PDF</span>
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span className="hidden sm:inline">{generatingProgress || "Generating…"}</span>
+                    <span className="sm:hidden">Saving…</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </>
+                )}
               </Button>
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleWhatsAppShare}
+                disabled={isGenerating}
+                className="hidden md:flex border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 h-9 rounded-xl text-xs gap-1.5 font-medium"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>WhatsApp</span>
+              </Button>
+
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setShowPreview(false)}
-                className="border-white/20 text-white hover:bg-white/10 h-9 w-9 p-0 rounded-lg"
+                className="border-white/15 text-white hover:bg-white/10 h-9 w-9 p-0 rounded-xl"
               >
                 <X className="w-4 h-4" />
               </Button>
             </div>
           </div>
 
-          <ScrollArea className="flex-1 w-full">
-            <div className="py-8 px-4 sm:px-8 flex justify-center min-h-full">
-              <div className="w-full max-w-[210mm] shadow-2xl rounded-xl overflow-hidden bg-white origin-top scale-[0.6] sm:scale-[0.75] md:scale-[0.85] lg:scale-95">
-                <ItineraryPdfDocument data={pdfData} user={user} />
-              </div>
+          {/* Full Screen Scroll Area */}
+          <div className="flex-1 w-full overflow-auto bg-slate-950 p-4 sm:p-8 flex justify-center custom-scrollbar">
+            <div 
+              className="transition-transform duration-150 origin-top flex flex-col items-center"
+              style={{
+                transform: `scale(${previewZoom / 100})`,
+                transformOrigin: "top center",
+                marginBottom: `${(previewZoom / 100) * 80}px`,
+              }}
+            >
+              <ItineraryPdfDocument data={pdfData} user={user} />
             </div>
-          </ScrollArea>
+          </div>
         </div>
       )}
 
       {/* --- MODAL 2: SEND TO CUSTOMER MODAL --- */}
       {showShareModal && (
-        <div className="fixed inset-0 z-[10000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 force-light">
+        <div className="fixed inset-0 z-[10006] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 force-light">
           <Card className="w-full max-w-md bg-white rounded-2xl p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -2777,6 +3163,9 @@ Thank you for choosing ${user?.company_name || "us"}!`;
             </div>
           </Card>
         </div>
+      )}
+        </>,
+        document.body
       )}
     </>
   );

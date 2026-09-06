@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Product, ItineraryDay } from "@/lib/types";
+import { normalizeProduct } from "@/lib/packageParser";
 
-type ProductInsert = {
+export type ProductInsert = {
   name: string;
   title?: string;
   description?: string;
@@ -19,6 +20,7 @@ type ProductInsert = {
   inclusions?: string[];
   exclusions?: string[];
   itinerary?: ItineraryDay[];
+  activities?: string[];
 };
 
 export function useProducts(userId?: number | string) {
@@ -28,21 +30,23 @@ export function useProducts(userId?: number | string) {
     queryKey: ["products", userId],
     queryFn: async () => {
       const data = await api.get<{ products: Product[] }>(`/api/products/index.php?user_id=${userId}`);
-      return data.products;
+      return (data.products || []).map(normalizeProduct);
     },
     enabled: !!userId,
   });
 
   const addProduct = useMutation({
     mutationFn: async (product: ProductInsert) => {
-      return await api.post<Product>("/api/products/index.php", product);
+      const res = await api.post<Product>("/api/products/index.php", product);
+      return normalizeProduct(res);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["products"] }),
   });
 
   const updateProduct = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Product> & { id: string | number }) => {
-      return await api.put<Product>("/api/products/update.php", { id, ...updates });
+      const res = await api.put<Product>("/api/products/update.php", { id, ...updates });
+      return normalizeProduct(res);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["products"] }),
   });

@@ -43,6 +43,7 @@ export interface ItineraryHotel {
   nights?: number;
   rooms?: number;
   price?: number;
+  ratePerNight?: number;
   starRating?: string;
   amenities?: string;
 }
@@ -112,6 +113,7 @@ export interface DetailedItineraryDay {
   activities: string;
   description: string;
   images: string[];
+  highlights?: string[];
   /** @deprecated Use itinerary-level `hotels` instead */
   hotel?: string;
   /** @deprecated Use itinerary-level `transports` instead */
@@ -143,6 +145,14 @@ export interface DetailedItinerary {
   exclusions: string[];
   clientNotes: string;
   created_at?: string;
+}
+
+export interface ItineraryDay {
+  day?: number;
+  title: string;
+  imageUrl?: string;
+  description: string;
+  highlights?: string[];
 }
 
 export interface Product {
