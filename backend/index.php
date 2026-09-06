@@ -1,0 +1,2 @@
+<?php
+echo "HELLO_FROM_ANTIGRAVITY_TEST";
