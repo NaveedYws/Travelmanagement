@@ -41,6 +41,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Plus,
 } from "lucide-react";
 import {
   DetailedItineraryDay,
@@ -58,6 +59,14 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { ItineraryPdfDocument, ItineraryPdfData } from "./ItineraryPdfDocument";
 import { cn } from "@/lib/utils";
+import {
+  DestinationItem,
+  DestinationDayTemplate,
+  getStoredDestinations,
+  addDayToDestination,
+  saveDestination,
+} from "@/lib/destinationStorage";
+import { DestinationManager } from "./DestinationManager";
 
 const COLOR_THEMES = [
   { id: "teal", name: "Teal Modern", color: "#0f766e", ring: "ring-teal-500", bg: "bg-teal-600" },
@@ -138,6 +147,38 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   const [newDayDescription, setNewDayDescription] = useState("");
   const [newDayImageUrl, setNewDayImageUrl] = useState("");
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  // Pre-fed Destination Itineraries Library
+  const [destLibrary, setDestLibrary] = useState<DestinationItem[]>([]);
+  const [selectedDestId, setSelectedDestId] = useState<string>("");
+  const [selectedDayTemplateId, setSelectedDayTemplateId] = useState<string>("");
+  const [saveToLibrary, setSaveToLibrary] = useState<boolean>(false);
+  const [targetDestNameForSave, setTargetDestNameForSave] = useState<string>("");
+
+  useEffect(() => {
+    const load = () => {
+      const items = getStoredDestinations();
+      setDestLibrary(items);
+    };
+    load();
+    window.addEventListener("destination_library_updated", load);
+    return () => window.removeEventListener("destination_library_updated", load);
+  }, []);
+
+  const selectedDest = useMemo(() => {
+    return destLibrary.find((d) => d.id === selectedDestId) || null;
+  }, [destLibrary, selectedDestId]);
+
+  const allKnownCities = useMemo(() => {
+    const set = new Set<string>();
+    destLibrary.forEach((d) => {
+      if (d.name) set.add(d.name.split(" ")[0]);
+      d.days.forEach((day) => {
+        if (day.destinationCity) set.add(day.destinationCity);
+      });
+    });
+    return Array.from(set);
+  }, [destLibrary]);
 
   // 4. Hotels (Blank clean start)
   const [hotels, setHotels] = useState<ItineraryHotel[]>([]);
@@ -338,6 +379,41 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   }, [finalQuotationTotal, adultMetric, numChildren]);
 
   // Day handlers
+  const handleSelectDayTemplate = (dayId: string) => {
+    setSelectedDayTemplateId(dayId);
+    if (!dayId || !selectedDest) return;
+
+    const dayTemplate = selectedDest.days.find((d) => d.id === dayId);
+    if (dayTemplate) {
+      setNewDayDestination(dayTemplate.destinationCity || selectedDest.name.split(" ")[0]);
+      setNewDayTitle(dayTemplate.title);
+      setNewDayDescription(dayTemplate.description);
+      setNewDayImageUrl(dayTemplate.imageUrl || "");
+      toast.success(`Loaded "${dayTemplate.title}" into form`);
+    }
+  };
+
+  const handleImportAllDays = () => {
+    if (!selectedDest || selectedDest.days.length === 0) {
+      toast.error("Please select a destination with pre-fed days first");
+      return;
+    }
+
+    const startIdx = days.length;
+    const importedDays: DetailedItineraryDay[] = selectedDest.days.map((template, idx) => ({
+      day: startIdx + idx + 1,
+      destination: template.destinationCity || selectedDest.name,
+      title: template.title,
+      activities: template.title,
+      description: template.description,
+      images: template.imageUrl ? [template.imageUrl] : [],
+    }));
+
+    setDays([...days, ...importedDays]);
+    setNewDayNumber(days.length + importedDays.length + 1);
+    toast.success(`Imported all ${importedDays.length} days from ${selectedDest.name}!`);
+  };
+
   const handleSaveDay = () => {
     if (!newDayTitle.trim()) {
       toast.error("Please enter a day title");
@@ -371,10 +447,34 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       toast.success(`Day ${newDay.day} added`);
     }
 
+    // Optionally save custom day to destination library
+    if (saveToLibrary) {
+      const destName = targetDestNameForSave.trim() || newDayDestination.trim() || destination.trim() || "My Destinations";
+      let destObj = destLibrary.find((d) => d.name.toLowerCase() === destName.toLowerCase());
+      if (!destObj) {
+        destObj = saveDestination({
+          name: destName,
+          stateOrCountry: "",
+          description: `Custom itinerary collection for ${destName}`,
+        });
+      }
+      addDayToDestination(destObj.id, {
+        dayNumber: (destObj.days?.length || 0) + 1,
+        destinationCity: newDayDestination.trim() || destName,
+        title: newDayTitle.trim(),
+        description: newDayDescription.trim(),
+        imageUrl: newDayImageUrl || undefined,
+      });
+      toast.success(`Saved day to "${destName}" destination library!`);
+      setSaveToLibrary(false);
+      setTargetDestNameForSave("");
+    }
+
     setNewDayTitle("");
     setNewDayDescription("");
     setNewDayImageUrl("");
     setNewDayDestination("");
+    setSelectedDayTemplateId("");
     setNewDayNumber(days.length + 2);
   };
 
@@ -645,6 +745,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       adults,
       children,
       theme,
+      colorTheme: selectedTheme,
       finalRate: String(finalQuotationTotal),
       heroImage: heroImage || (days.find((d) => d.images && d.images[0]?.trim())?.images[0]) || "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600",
       days,
@@ -667,6 +768,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       adults,
       children,
       theme,
+      selectedTheme,
       finalQuotationTotal,
       heroImage,
       days,
@@ -1425,6 +1527,120 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       )}
                     </div>
 
+                    {/* Quick Fill Dropdown from Destination Library */}
+                    <div className="rounded-xl border border-teal-200 bg-teal-50/70 p-3.5 space-y-3 shadow-2xs">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-teal-900">
+                          <Sparkles className="w-4 h-4 text-teal-600 shrink-0" />
+                          <span>Quick Fill from Pre-fed Destination Itinerary</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {selectedDest && selectedDest.days.length > 0 && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={handleImportAllDays}
+                              className="h-7 px-2.5 text-[11px] font-semibold text-teal-800 bg-white border-teal-300 hover:bg-teal-100/60 gap-1 shadow-2xs"
+                              title={`Import all ${selectedDest.days.length} days at once`}
+                            >
+                              <Layers className="w-3.5 h-3.5 text-teal-600" />
+                              Import All ({selectedDest.days.length}) Days
+                            </Button>
+                          )}
+
+                          <DestinationManager
+                            trigger={
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2.5 text-[11px] font-semibold text-teal-700 bg-white border-teal-300 hover:bg-teal-50 hover:text-teal-900 gap-1 shadow-2xs"
+                              >
+                                <Plus className="w-3.5 h-3.5 text-teal-600" />
+                                Add Destination
+                              </Button>
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
+                            1. Select Destination ({destLibrary.length})
+                          </Label>
+                          <select
+                            value={selectedDestId}
+                            onChange={(e) => {
+                              const destId = e.target.value;
+                              setSelectedDestId(destId);
+                              setSelectedDayTemplateId("");
+                              const found = destLibrary.find((d) => d.id === destId);
+                              if (found && !destination) {
+                                setDestination(found.name);
+                              }
+                            }}
+                            className="w-full h-9 px-3 rounded-lg border border-teal-300/80 bg-white text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs"
+                          >
+                            <option value="">-- Choose Pre-fed Destination --</option>
+                            {destLibrary.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                📍 {d.name} ({d.days.length} Days)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
+                            2. Choose Itinerary Day from Dropdown
+                          </Label>
+                          <select
+                            disabled={!selectedDest || selectedDest.days.length === 0}
+                            value={selectedDayTemplateId}
+                            onChange={(e) => handleSelectDayTemplate(e.target.value)}
+                            className="w-full h-9 px-3 rounded-lg border border-teal-300/80 bg-white text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                          >
+                            <option value="">
+                              {selectedDest
+                                ? selectedDest.days.length > 0
+                                  ? "-- Select Day to Autofill Form --"
+                                  : "No days fed for this destination yet"
+                                : "Select a destination first"}
+                            </option>
+                            {selectedDest?.days.map((day) => (
+                              <option key={day.id} value={day.id}>
+                                Day {day.dayNumber}: {day.title.length > 40 ? day.title.substring(0, 40) + "..." : day.title}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {selectedDayTemplateId && (
+                        <div className="flex items-center justify-between text-[11px] text-teal-800 bg-teal-100/70 px-3 py-1.5 rounded-lg border border-teal-200">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <Check className="w-3.5 h-3.5 text-teal-700" />
+                            Template loaded into fields below. Edit anything or click "+ Add Day to Itinerary"!
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedDayTemplateId("");
+                              setNewDayTitle("");
+                              setNewDayDescription("");
+                              setNewDayImageUrl("");
+                            }}
+                            className="text-teal-800 hover:text-teal-950 font-bold hover:underline"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="space-y-1">
                         <Label className="text-[11px] font-bold text-slate-600">Day Number</Label>
@@ -1439,11 +1655,17 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       <div className="space-y-1 sm:col-span-2">
                         <Label className="text-[11px] font-bold text-slate-600">Destination / City</Label>
                         <Input
+                          list="day-destination-cities-list"
                           value={newDayDestination}
                           onChange={(e) => setNewDayDestination(e.target.value)}
                           placeholder="e.g. Srinagar, Paris, Bali"
                           className="h-10 bg-white"
                         />
+                        <datalist id="day-destination-cities-list">
+                          {allKnownCities.map((c) => (
+                            <option key={c} value={c} />
+                          ))}
+                        </datalist>
                       </div>
                     </div>
 
@@ -1512,6 +1734,29 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                           </>
                         )}
                       </div>
+                    </div>
+
+                    {/* Optional: Save to Destination Library toggle */}
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 font-medium">
+                        <input
+                          type="checkbox"
+                          checked={saveToLibrary}
+                          onChange={(e) => setSaveToLibrary(e.target.checked)}
+                          className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 w-4 h-4 cursor-pointer"
+                        />
+                        <span>Save this day to Destination Library for future quotations</span>
+                      </label>
+                      {saveToLibrary && (
+                        <div className="w-48">
+                          <Input
+                            value={targetDestNameForSave}
+                            onChange={(e) => setTargetDestNameForSave(e.target.value)}
+                            placeholder={newDayDestination || destination || "Destination name"}
+                            className="h-7 text-xs bg-white"
+                          />
+                        </div>
+                      )}
                     </div>
 
                     {/* Full width Teal button matching screenshot */}
@@ -3038,6 +3283,22 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                 <Maximize2 className="w-3 h-3" />
                 <span className="hidden sm:inline">Fit</span>
               </Button>
+            </div>
+
+            {/* Center-Right: Live Luxury Theme Switcher */}
+            <div className="hidden lg:flex items-center gap-1.5 bg-slate-800/90 rounded-xl px-2.5 py-1 border border-white/10 text-white">
+              <span className="text-[10px] uppercase font-bold text-slate-400 mr-0.5">Palette</span>
+              {COLOR_THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setSelectedTheme(t.id)}
+                  title={`${t.name} Palette`}
+                  className={`w-5 h-5 rounded-full transition-all cursor-pointer ${t.bg} ${
+                    selectedTheme === t.id ? "ring-2 ring-white scale-110 shadow-md" : "opacity-60 hover:opacity-100"
+                  }`}
+                />
+              ))}
             </div>
 
             {/* Right: Actions */}

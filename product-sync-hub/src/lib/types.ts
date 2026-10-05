@@ -197,3 +197,24 @@ export interface Inquiry {
     category: string | null;
   };
 }
+
+export interface DestinationDayTemplate {
+  id: string;
+  dayNumber: number;
+  destinationCity: string;
+  title: string;
+  description: string;
+  imageUrl?: string;
+  activities?: string;
+}
+
+export interface DestinationItem {
+  id: string;
+  name: string;
+  stateOrCountry?: string;
+  coverImage?: string;
+  description?: string;
+  days: DestinationDayTemplate[];
+  createdAt?: string;
+  updatedAt?: string;
+}

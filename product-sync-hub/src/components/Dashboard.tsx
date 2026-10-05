@@ -12,6 +12,7 @@ import { InquiryDashboard } from "./InquiryDashboard";
 import { AdminUsers } from "./AdminUsers";
 import { BulkImport } from "./BulkImport";
 import { ItineraryMaker } from "./ItineraryMaker";
+import { DestinationManager } from "./DestinationManager";
 import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +34,8 @@ import {
   ClipboardList, 
   TrendingUp, 
   DollarSign, 
-  FileText
+  FileText,
+  MapPin
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -53,7 +55,7 @@ export function Dashboard() {
   const { inquiries, isLoading: inquiriesLoading } = useInquiries(user?.id);
 
   const activeInquiryCount = inquiries.filter((i) => i.status === "new" || i.status === "contacted").length;
-  const [activeView, setActiveView] = useState<"dashboard" | "manage" | "inquiries" | "settings" | "admin">("dashboard");
+  const [activeView, setActiveView] = useState<"dashboard" | "manage" | "inquiries" | "destinations" | "settings" | "admin">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
   const [isUpdatingPass, setIsUpdatingPass] = useState(false);
@@ -137,12 +139,13 @@ export function Dashboard() {
   };
 
   const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "manage", label: config.label, icon: BusinessIcon, count: products.length },
-    { id: "inquiries", label: "Inquiries", icon: ClipboardList, badge: activeInquiryCount > 0 ? activeInquiryCount : undefined },
-    ...((role === "admin" || user?.email === "adsverse0@gmail.com") ? [{ id: "admin", label: "Admin", icon: Users }] : []),
-    { id: "settings", label: "Settings", icon: Settings },
-  ] as const;
+    { id: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
+    { id: "manage" as const, label: config.label, icon: BusinessIcon, count: products.length },
+    ...(businessType === "travel" ? [{ id: "destinations" as const, label: "Destinations", icon: MapPin }] : []),
+    { id: "inquiries" as const, label: "Inquiries", icon: ClipboardList, badge: activeInquiryCount > 0 ? activeInquiryCount : undefined },
+    ...((role === "admin" || user?.email === "adsverse0@gmail.com") ? [{ id: "admin" as const, label: "Admin", icon: Users }] : []),
+    { id: "settings" as const, label: "Settings", icon: Settings },
+  ];
 
   const renderContent = () => {
     switch (activeView) {
@@ -171,6 +174,21 @@ export function Dashboard() {
                         <FileText className="w-3.5 h-3.5" />
                         <span>Create Itinerary</span>
                       </button>
+                    }
+                  />
+                )}
+
+                {businessType === "travel" && (
+                  <DestinationManager
+                    trigger={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-9 px-3.5 rounded-lg border-teal-200 dark:border-teal-800 bg-teal-50/60 dark:bg-teal-950/40 text-teal-800 dark:text-teal-300 hover:bg-teal-100/70 text-xs font-semibold gap-1.5 shadow-2xs"
+                      >
+                        <MapPin className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                        <span>Add Destination</span>
+                      </Button>
                     }
                   />
                 )}
@@ -343,6 +361,20 @@ export function Dashboard() {
                       </div>
                     </div>
 
+                    {businessType === "travel" && (
+                      <DestinationManager
+                        trigger={
+                          <div className="w-full flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/80 hover:border-teal-300 dark:hover:border-teal-700 transition-colors text-left cursor-pointer">
+                            <MapPin className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-slate-900 dark:text-slate-100 truncate">Destinations</p>
+                              <p className="text-[10px] text-slate-400 truncate">Pre-feed itineraries</p>
+                            </div>
+                          </div>
+                        }
+                      />
+                    )}
+
                     <div className="w-full">
                       <BulkImport onImport={handleBulkImport} itemName={config.itemName} />
                     </div>
@@ -420,6 +452,9 @@ export function Dashboard() {
             )}
           </div>
         );
+
+      case "destinations":
+        return <DestinationManager inline />;
 
       case "inquiries":
         return <InquiryDashboard />;
