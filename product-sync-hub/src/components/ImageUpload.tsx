@@ -9,9 +9,12 @@ interface ImageUploadProps {
   value?: string;
   onChange: (url: string) => void;
   userId?: string | number;
+  label?: string;
+  helperText?: string;
+  className?: string;
 }
 
-export function ImageUpload({ value, onChange, userId }: ImageUploadProps) {
+export function ImageUpload({ value, onChange, userId, label, helperText, className }: ImageUploadProps) {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -55,7 +58,8 @@ export function ImageUpload({ value, onChange, userId }: ImageUploadProps) {
   };
 
   return (
-    <div className="space-y-2">
+    <div className={className || "space-y-2"}>
+      {label && <span className="block text-xs font-medium text-slate-700 dark:text-slate-300">{label}</span>}
       {value ? (
         <div className="relative w-full h-36 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group bg-slate-100 dark:bg-slate-800">
           <img src={value} alt="Preview" className="w-full h-full object-cover" />
@@ -82,7 +86,7 @@ export function ImageUpload({ value, onChange, userId }: ImageUploadProps) {
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="w-full h-24 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl flex flex-col items-center justify-center gap-1.5 text-slate-500 dark:text-slate-400 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-all disabled:opacity-50 cursor-pointer"
+          className="w-full h-24 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl flex flex-col items-center justify-center gap-1 text-slate-500 dark:text-slate-400 hover:border-blue-500 dark:hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-all disabled:opacity-50 cursor-pointer"
         >
           {uploading ? (
             <div className="flex flex-col items-center gap-1">
@@ -93,9 +97,11 @@ export function ImageUpload({ value, onChange, userId }: ImageUploadProps) {
             </div>
           ) : (
             <>
-              <ImagePlus className="w-6 h-6 text-blue-500" />
-              <span className="text-xs font-medium">Upload Image</span>
-              <span className="text-[10px] text-slate-400 dark:text-slate-500">Auto-compressed to 500KB</span>
+              <ImagePlus className="w-5 h-5 text-blue-500" />
+              <span className="text-xs font-medium">{label || "Upload Image"}</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                {helperText || "Auto-compressed to 500KB"}
+              </span>
             </>
           )}
         </button>

@@ -218,3 +218,43 @@ export interface DestinationItem {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export interface BlogPost {
+  id: string | number;
+  user_id: string | number;
+  title: string;
+  slug: string;
+  category?: string | null;
+  tags?: string[];
+  author_name?: string | null;
+  excerpt?: string | null;
+  content?: string | null;
+  featured_image?: string | null;
+  secondary_image?: string | null;
+  status: "published" | "draft" | "archived";
+  reading_time?: string | null;
+  published_at?: string | null;
+  meta_title?: string | null;
+  meta_description?: string | null;
+  meta_keywords?: string | null;
+  canonical_url?: string | null;
+  og_title?: string | null;
+  og_description?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  seo?: {
+    meta_title?: string | null;
+    meta_description?: string | null;
+    meta_keywords?: string | null;
+    canonical_url?: string | null;
+    og_title?: string | null;
+    og_description?: string | null;
+    og_image?: string | null;
+    featured_image?: string | null;
+    reading_time?: string | null;
+    published_at?: string | null;
+  };
+}
+
+export type BlogInsert = Omit<BlogPost, "id" | "user_id" | "created_at" | "updated_at" | "seo">;
+

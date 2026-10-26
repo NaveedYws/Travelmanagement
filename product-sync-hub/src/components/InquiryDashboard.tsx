@@ -34,11 +34,13 @@ import {
   TrendingUp,
   Share2,
   Copy,
+  Calendar as CalendarIcon,
   Users
 } from "lucide-react";
 import { toast } from "sonner";
 import { Inquiry } from "@/lib/types";
 import { LeadImporterModal } from "@/components/LeadImporterModal";
+import { LeadCalendarView } from "./LeadCalendarView";
 import Papa from "papaparse";
 
 const STATUS_CONFIGS = {
@@ -72,7 +74,7 @@ export function InquiryDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
-  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [viewMode, setViewMode] = useState<"table" | "cards" | "calendar">("table");
   const [importerOpen, setImporterOpen] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Inquiry | null>(null);
 
@@ -407,6 +409,16 @@ export function InquiryDashboard() {
               <LayoutGrid className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Cards</span>
             </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "calendar" ? "secondary" : "ghost"}
+              className="h-7 px-2 text-xs gap-1"
+              onClick={() => setViewMode("calendar")}
+              title="Calendar View"
+            >
+              <CalendarIcon className="w-3.5 h-3.5 text-blue-500" />
+              <span className="hidden sm:inline">Calendar</span>
+            </Button>
           </div>
 
           {/* Export CSV */}
@@ -433,7 +445,13 @@ export function InquiryDashboard() {
       </div>
 
       {/* Main Content Area */}
-      {filteredInquiries.length === 0 ? (
+      {viewMode === "calendar" ? (
+        <LeadCalendarView
+          inquiries={filteredInquiries}
+          onSelectLead={setSelectedLead}
+          onUpdateStatus={handleStatusChange}
+        />
+      ) : filteredInquiries.length === 0 ? (
         <Card className="border-dashed py-14">
           <CardContent className="flex flex-col items-center justify-center text-center space-y-3">
             <div className="w-14 h-14 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground/60">
