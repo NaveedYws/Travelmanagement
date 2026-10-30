@@ -11,6 +11,8 @@ interface AuthContextType {
   signUp: (email: string, password: string, businessType?: string) => Promise<{ message: string; email: string }>;
   verifyOtp: (email: string, otp: string) => Promise<void>;
   signOut: () => Promise<void>;
+  updateProfile: (profileData: Partial<User>) => Promise<{ message: string; user: User }>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -34,7 +36,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api.get<{ user: User }>("/api/auth/me.php");
       setUser(data.user);
-      setBusinessType(data.user.business_type || "products");
+      const bType = data.user.business_type === "hotel" ? "hotel" : "travel";
+      setBusinessType(bType);
       setRole(data.user.role || "user");
       setLoading(false); // Success! Stop loading.
     } catch (err) {
@@ -54,7 +57,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await api.post<{ user: User; token: string }>("/api/auth/login.php", { email, password });
     localStorage.setItem('token', data.token);
     setUser(data.user);
-    setBusinessType(data.user.business_type || "products");
+    const bType = data.user.business_type === "hotel" ? "hotel" : "travel";
+    setBusinessType(bType);
     setRole(data.user.role || "user");
   };
 
@@ -62,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return await api.post<{ message: string; email: string }>("/api/auth/register.php", { 
       email, 
       password, 
-      business_type: businessType || "products" 
+      business_type: businessType || "travel" 
     });
   };
 
@@ -70,7 +74,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await api.post<{ user: User; token: string }>("/api/auth/verify-otp.php", { email, otp });
     localStorage.setItem('token', data.token);
     setUser(data.user);
-    setBusinessType(data.user.business_type || "products");
+    const bType = data.user.business_type === "hotel" ? "hotel" : "travel";
+    setBusinessType(bType);
     setRole(data.user.role || "user");
   };
 
@@ -81,8 +86,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRole(null);
   };
 
+  const updateProfile = async (profileData: Partial<User>) => {
+    const res = await api.post<{ message: string; user: User }>("/api/auth/update_profile.php", profileData);
+    if (res.user) {
+      setUser(res.user);
+    }
+    return res;
+  };
+
+  const refreshUser = async () => {
+    await checkAuth();
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, businessType, role, signIn, signUp, verifyOtp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, businessType, role, signIn, signUp, verifyOtp, signOut, updateProfile, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

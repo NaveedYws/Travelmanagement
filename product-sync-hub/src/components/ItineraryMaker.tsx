@@ -91,9 +91,19 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Metadata
-  const [quotationRef] = useState(() => `QT-${Math.floor(10000 + Math.random() * 90000)}`);
+  const [quotationRef] = useState(() => {
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    return `QT-${todayStr}-${Math.floor(100 + Math.random() * 900)}`;
+  });
   const [quotationDate] = useState(() =>
     new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+  );
+  const [validUntilDate] = useState(() =>
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    })
   );
 
   // Rate Display Mode Switch: "subtotal" (only show subtotal) vs "full" (full customized rate: hotel, transport, flight, airfare)
@@ -737,7 +747,10 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     () => ({
       quotationRef,
       quotationDate,
+      validUntilDate,
       clientName,
+      clientPhone,
+      clientEmail,
       tripTitle,
       destination,
       startDate,
@@ -746,12 +759,21 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       children,
       theme,
       colorTheme: selectedTheme,
+      subTotal,
+      discountAmount,
+      discountPercent: discountAmount && subTotal ? Math.round((discountAmount / subTotal) * 100) : 10,
+      gstAmount,
+      gstRate,
       finalRate: String(finalQuotationTotal),
-      heroImage: heroImage || (days.find((d) => d.images && d.images[0]?.trim())?.images[0]) || "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600",
+      heroImage:
+        heroImage ||
+        (days.find((d) => d.images && d.images[0]?.trim())?.images[0]) ||
+        "https://images.unsplash.com/photo-1595815771614-ade9d652a65d?auto=format&fit=crop&q=80&w=1200",
       days,
       flights,
       hotels,
       transports,
+      sightseeings,
       customServices: otherServices,
       inclusions,
       exclusions,
@@ -760,7 +782,12 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       dateRange,
     }),
     [
+      quotationRef,
+      quotationDate,
+      validUntilDate,
       clientName,
+      clientPhone,
+      clientEmail,
       tripTitle,
       destination,
       startDate,
@@ -769,12 +796,17 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       children,
       theme,
       selectedTheme,
+      subTotal,
+      discountAmount,
+      gstAmount,
+      gstRate,
       finalQuotationTotal,
       heroImage,
       days,
       flights,
       hotels,
       transports,
+      sightseeings,
       otherServices,
       inclusions,
       exclusions,

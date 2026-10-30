@@ -1,6 +1,10 @@
 import { compressImageTo500KB } from "./imageCompression";
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const rawUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').trim();
+const normalizedUrl = rawUrl.startsWith('http://') || rawUrl.startsWith('https://') 
+  ? rawUrl 
+  : `https://${rawUrl}`;
+const API_URL = normalizedUrl.replace(/\/+$/, '');
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('token');
@@ -10,7 +14,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...(options.headers || {}),
   };
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const response = await fetch(`${API_URL}${cleanPath}`, {
     ...options,
     headers,
   });

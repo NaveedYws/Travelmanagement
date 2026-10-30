@@ -1,38 +1,10 @@
-import React from "react";
-import {
-  Hotel,
-  Car,
-  Activity,
-  Plane,
-  CheckCircle2,
-  XCircle,
-  Phone,
-  Globe,
-  Mail,
-  MapPin,
-  Calendar,
-  Users,
-  Sparkles,
-  Layers,
-  Compass,
-  ShieldCheck,
-  Clock,
-  Award,
-  Star,
-  Coffee,
-  Check,
-  ArrowRight,
-  Bookmark,
-  BadgeCheck,
-  Luggage,
-  Utensils,
-  Map,
-} from "lucide-react";
+import React, { useState, useEffect } from "react";
 import {
   DetailedItineraryDay,
   ItineraryFlight,
   ItineraryHotel,
   ItineraryTransport,
+  ItinerarySightseeing,
   ItineraryService,
 } from "@/lib/types";
 import type { User } from "@/lib/types";
@@ -40,7 +12,10 @@ import type { User } from "@/lib/types";
 export interface ItineraryPdfData {
   quotationRef?: string;
   quotationDate?: string;
+  validUntilDate?: string;
   clientName: string;
+  clientPhone?: string;
+  clientEmail?: string;
   tripTitle: string;
   destination: string;
   startDate: string;
@@ -50,18 +25,25 @@ export interface ItineraryPdfData {
   theme: string;
   colorTheme?: string;
   templateStyle?: "editorial" | "executive" | "modern";
+  subTotal?: number;
+  discountAmount?: number;
+  discountPercent?: number;
+  gstAmount?: number;
+  gstRate?: number;
   finalRate: string;
   heroImage: string;
   days: DetailedItineraryDay[];
   flights: ItineraryFlight[];
   hotels: ItineraryHotel[];
   transports: ItineraryTransport[];
+  sightseeings?: ItinerarySightseeing[];
   customServices?: ItineraryService[];
   inclusions: string[];
   exclusions: string[];
   clientNotes: string;
   duration: string;
   dateRange: string;
+  guestPhotos?: string[];
 }
 
 interface ItineraryPdfDocumentProps {
@@ -69,1221 +51,1063 @@ interface ItineraryPdfDocumentProps {
   user?: User | null;
 }
 
-const PAGE = "w-[210mm] h-[297mm] bg-white overflow-hidden relative shrink-0 shadow-2xl mb-8 last:mb-0 select-none print:shadow-none print:mb-0";
+const PAGE =
+  "w-[210mm] h-[297mm] bg-white overflow-hidden relative shrink-0 shadow-2xl mb-8 last:mb-0 select-none print:shadow-none print:mb-0 text-slate-800 font-sans leading-normal";
 
-export const THEME_PALETTES: Record<string, {
-  name: string;
-  primary: string;
-  primaryBg: string;
-  primaryBorder: string;
-  primaryLight: string;
-  gradient: string;
-  ribbon: string;
-  tagBg: string;
-  tagText: string;
-  accentColor: "teal" | "blue" | "emerald" | "amber" | "purple";
-}> = {
-  teal: {
-    name: "Teal Modern",
-    primary: "#0f766e",
-    primaryBg: "bg-teal-700",
-    primaryBorder: "border-teal-300",
-    primaryLight: "bg-teal-50/70",
-    gradient: "from-teal-700 via-teal-600 to-emerald-600",
-    ribbon: "from-amber-400 via-yellow-300 to-teal-400",
-    tagBg: "bg-teal-100/80",
-    tagText: "text-teal-900",
-    accentColor: "teal",
-  },
-  blue: {
-    name: "Royal Azure",
-    primary: "#1d4ed8",
-    primaryBg: "bg-blue-700",
-    primaryBorder: "border-blue-300",
-    primaryLight: "bg-blue-50/70",
-    gradient: "from-blue-700 via-blue-600 to-indigo-600",
-    ribbon: "from-amber-400 via-yellow-300 to-blue-400",
-    tagBg: "bg-blue-100/80",
-    tagText: "text-blue-900",
-    accentColor: "blue",
-  },
-  emerald: {
-    name: "Emerald Pine",
-    primary: "#047857",
-    primaryBg: "bg-emerald-700",
-    primaryBorder: "border-emerald-300",
-    primaryLight: "bg-emerald-50/70",
-    gradient: "from-emerald-700 via-emerald-600 to-teal-600",
-    ribbon: "from-amber-400 via-yellow-300 to-emerald-400",
-    tagBg: "bg-emerald-100/80",
-    tagText: "text-emerald-900",
-    accentColor: "emerald",
-  },
-  indigo: {
-    name: "Deep Sapphire",
-    primary: "#4338ca",
-    primaryBg: "bg-indigo-700",
-    primaryBorder: "border-indigo-300",
-    primaryLight: "bg-indigo-50/70",
-    gradient: "from-indigo-700 via-indigo-600 to-purple-600",
-    ribbon: "from-amber-400 via-yellow-300 to-indigo-400",
-    tagBg: "bg-indigo-100/80",
-    tagText: "text-indigo-900",
-    accentColor: "purple",
-  },
-  rose: {
-    name: "Ruby Rose",
-    primary: "#be123c",
-    primaryBg: "bg-rose-700",
-    primaryBorder: "border-rose-300",
-    primaryLight: "bg-rose-50/70",
-    gradient: "from-rose-700 via-rose-600 to-pink-600",
-    ribbon: "from-amber-400 via-yellow-300 to-rose-400",
-    tagBg: "bg-rose-100/80",
-    tagText: "text-rose-900",
-    accentColor: "amber",
-  },
-  amber: {
-    name: "Sunset Gold",
-    primary: "#b45309",
-    primaryBg: "bg-amber-700",
-    primaryBorder: "border-amber-300",
-    primaryLight: "bg-amber-50/70",
-    gradient: "from-amber-700 via-amber-600 to-orange-600",
-    ribbon: "from-yellow-400 via-amber-300 to-orange-400",
-    tagBg: "bg-amber-100/80",
-    tagText: "text-amber-900",
-    accentColor: "amber",
-  },
-  slate: {
-    name: "Platinum Slate",
-    primary: "#334155",
-    primaryBg: "bg-slate-800",
-    primaryBorder: "border-slate-300",
-    primaryLight: "bg-slate-100/70",
-    gradient: "from-slate-800 via-slate-700 to-slate-900",
-    ribbon: "from-amber-400 via-yellow-300 to-slate-400",
-    tagBg: "bg-slate-200/80",
-    tagText: "text-slate-900",
-    accentColor: "teal",
-  },
-};
+export function getCompanyProfile(user?: User | null) {
+  let localData: any = {};
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem("agency_company_profile");
+      if (raw) localData = JSON.parse(raw);
+    } catch {}
+  }
+
+  return {
+    name: user?.company_name || localData.company_name || "",
+    logo: user?.company_logo || localData.company_logo || "",
+    phone: user?.company_phone || localData.company_phone || "",
+    email: user?.company_email || localData.company_email || user?.email || "",
+    address: user?.company_address || localData.company_address || "",
+    website: user?.company_website || localData.company_website || "",
+    bankName: user?.bank_name || localData.bank_name || "",
+    accountHolder: user?.bank_account_name || localData.bank_account_name || "",
+    accountNumber: user?.bank_account_no || localData.bank_account_no || "",
+    ifsc: user?.bank_ifsc || localData.bank_ifsc || "",
+    upiId: user?.bank_upi_id || localData.bank_upi_id || "",
+    instagram: localData.company_instagram || "",
+    facebook: localData.company_facebook || "",
+  };
+}
 
 export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) {
+  const [profileSync, setProfileSync] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setProfileSync((prev) => prev + 1);
+    window.addEventListener("agency_profile_updated", handleUpdate);
+    return () => window.removeEventListener("agency_profile_updated", handleUpdate);
+  }, []);
+
+  const company = getCompanyProfile(user);
+
   const {
-    quotationRef = "QT-PROPOSAL",
-    quotationDate,
-    clientName,
-    tripTitle,
-    destination,
-    adults,
-    children,
-    theme,
-    colorTheme = "teal",
-    finalRate,
-    heroImage,
+    quotationRef = "QT-20261030-001",
+    quotationDate = new Date().toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    validUntilDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }),
+    clientName = "Valued Traveler",
+    clientPhone = "",
+    clientEmail = "",
+    tripTitle = "",
+    destination = "",
+    duration = "Dates to be confirmed",
+    adults = "2",
+    children = "0",
+    finalRate = "0",
+    discountAmount = 0,
+    discountPercent = 10,
+    gstAmount = 0,
+    gstRate = 18,
     days = [],
-    flights = [],
-    transports = [],
     hotels = [],
-    customServices = [],
+    transports = [],
+    sightseeings = [],
     inclusions = [],
     exclusions = [],
-    clientNotes,
-    duration,
-    dateRange,
+    clientNotes = "",
+    guestPhotos = [],
+    heroImage = "",
   } = data;
 
-  const currentTheme = THEME_PALETTES[colorTheme] || THEME_PALETTES.teal;
-  const price = parseFloat(finalRate || "0").toLocaleString("en-IN");
-  const guestLabel = `${adults} Adult${parseInt(adults) !== 1 ? "s" : ""}${
-    parseInt(children) > 0 ? ` · ${children} Child${parseInt(children) !== 1 ? "ren" : ""}` : ""
+  // Filter actual items added by user
+  const activeDays = days.filter((d) => (d.title || d.description || "").trim());
+  const activeHotels = hotels.filter((h) => (h.hotelName || "").trim());
+  const activeTransports = transports.filter((t) => (t.vehicleType || t.route || t.notes || "").trim());
+  const activeActivities = (sightseeings || []).filter((s) => (s.title || "").trim());
+  const activeInclusions = (inclusions || []).filter((i) => i.trim());
+  const activeExclusions = (exclusions || []).filter((e) => e.trim());
+
+  const numAdults = parseInt(adults) || 1;
+  const numChildren = parseInt(children) || 0;
+  const guestCount = `${numAdults} Adult${numAdults > 1 ? "s" : ""}${
+    numChildren > 0 ? ` · ${numChildren} Child${numChildren > 1 ? "ren" : ""}` : ""
   }`;
-  const issuedDate =
-    quotationDate ||
-    new Date().toLocaleDateString("en-IN", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
 
-  const validHotels = hotels.filter(hotelHasData);
-  const validTransports = transports.filter(transportHasData);
-  const validFlights = flights.filter(flightHasData);
-  const validServices = customServices.filter((s) => (s.title || "").trim());
+  const numFinalPrice = parseFloat(finalRate || "0");
+  const formattedPrice = numFinalPrice > 0 ? numFinalPrice.toLocaleString("en-IN") : "0";
 
-  // High quality travel destination background
-  const DEFAULT_TRAVEL_BG =
+  // Days pagination: Day 1 is on Page 2 with Quotation summary.
+  // Remaining days are grouped 2 per page.
+  const remainingDays = activeDays.slice(1);
+  const dayPairs: DetailedItineraryDay[][] = [];
+  for (let i = 0; i < remainingDays.length; i += 2) {
+    dayPairs.push(remainingDays.slice(i, i + 2));
+  }
+
+  // Determine which extra sections have data
+  const hasAccommodationOrServices =
+    activeHotels.length > 0 || activeTransports.length > 0 || activeActivities.length > 0 || activeInclusions.length > 0;
+
+  const hasPaymentDetails =
+    Boolean(company.accountNumber || company.upiId || company.accountHolder || company.ifsc);
+
+  const hasGuestPhotos = guestPhotos.length > 0 || (heroImage && !heroImage.includes("placeholder"));
+
+  // Calculate dynamic total pages
+  let totalPages = 1; // Page 1: Cover
+  totalPages += 1; // Page 2: Summary + Day 1
+  totalPages += dayPairs.length; // Remaining day pages
+  if (hasAccommodationOrServices) totalPages += 1; // Page: Accommodations & Services
+  if (hasPaymentDetails) totalPages += 1; // Page: Payment & Bank
+  if (hasGuestPhotos) totalPages += 1; // Page: Guest Pictures
+
+  let currentPage = 1;
+
+  const coverBg =
+    heroImage ||
+    activeDays.find((d) => d.images && d.images[0]?.trim())?.images?.[0] ||
     "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600";
-  const activeTravelBg =
-    heroImage && !heroImage.includes("photo-1488646953014-85cb44e25828")
-      ? heroImage
-      : days.find((d) => d.images && d.images[0]?.trim())?.images[0] || DEFAULT_TRAVEL_BG;
-
-  // Running page numbers
-  let pageCounter = 1;
-  const coverPageNum = pageCounter++;
-  const overviewPageNum = pageCounter++;
-  const hotelPageNum = validHotels.length > 0 ? pageCounter++ : null;
-  const transportPageNum = validTransports.length > 0 ? pageCounter++ : null;
-  const flightPageNum = validFlights.length > 0 ? pageCounter++ : null;
-  const servicesPageNum = validServices.length > 0 ? pageCounter++ : null;
-  const dayPageStart = pageCounter;
-  pageCounter += days.length;
-  const summaryPageNum = pageCounter;
 
   return (
-    <div className="font-sans text-slate-900 antialiased selection:bg-teal-500 selection:text-white">
+    <div className="font-sans text-slate-800 antialiased selection:bg-teal-500 selection:text-white bg-slate-100 flex flex-col items-center">
       {/* ========================================================================= */}
-      {/* 1. COVER PAGE: LUXURY EDITORIAL STYLE                                     */}
+      {/* PAGE 1: COVER PAGE (With Scenic Background Image & Profile Branding)       */}
       {/* ========================================================================= */}
       <div data-pdf-page className={PAGE}>
-        {/* Full-bleed high-res background image */}
-        <img
-          src={activeTravelBg}
-          alt=""
-          className="absolute inset-0 w-full h-full object-cover"
-          crossOrigin={getSafeCrossOrigin(activeTravelBg)}
-        />
+        {/* Scenic Travel Background Image Layer */}
+        <div className="absolute inset-0 z-0 overflow-hidden">
+          <img
+            src={coverBg}
+            alt="Cover Travel Scenery"
+            className="w-full h-full object-cover scale-105"
+          />
+          {/* Luminous frosted overlay to ensure scenery shines through while text is 100% readable */}
+          <div className="absolute inset-0 bg-white/80" />
+          <div className="absolute inset-0 bg-gradient-to-b from-white/95 via-white/70 to-white/95" />
+        </div>
 
-        {/* High-Contrast Multi-Stop Dark Vignette */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#030914] via-[#051324]/85 to-[#061426]/60" />
-        <div className="absolute inset-0 bg-radial from-transparent via-[#040c18]/40 to-[#030812]/90" />
+        <div className="h-full flex flex-col justify-between pt-14 pb-20 px-12 text-center relative z-10">
+          {/* Top Logo & Agency Brand Name from User Settings */}
+          <div className="flex flex-col items-center">
+            <CompanyLogo
+              logo={company.logo}
+              name={company.name}
+              className="h-20 max-w-[240px] w-auto object-contain mb-3 drop-shadow-xs"
+            />
 
-        {/* Top Metallic Accent Ribbon */}
-        <div className={`absolute top-0 left-0 right-0 h-2 bg-gradient-to-r ${currentTheme.ribbon} shadow-md`} />
+            <h1 className="text-2xl font-black tracking-[0.2em] uppercase text-[#1e3a8a] mt-1 drop-shadow-xs">
+              {company.name || "EXCLUSIVE TRAVEL QUOTATION"}
+            </h1>
+          </div>
 
-        <div className="relative z-10 h-full flex flex-col justify-between p-10 sm:p-12 text-white">
-          {/* Top Bar: Agency Brand & Quotation Badge */}
-          <div className="flex justify-between items-start">
-            <BrandMark user={user} variant="light" />
+          {/* Quotation Info & Client Name Showcase Card */}
+          <div className="my-auto py-5 relative z-10 max-w-lg mx-auto w-full">
+            <div className="bg-white/85 backdrop-blur-md rounded-3xl p-6 sm:p-8 border border-white/90 shadow-xl text-center space-y-2">
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
+                QUOTATION
+              </p>
+              <p className="text-xs text-slate-600 font-medium">
+                No: {quotationRef} &nbsp;|&nbsp; Date: {quotationDate} &nbsp;|&nbsp; Valid: {validUntilDate}
+              </p>
 
-            <div className="text-right space-y-1.5">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 backdrop-blur-md border border-amber-300/40 text-amber-300 shadow-md">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span className="text-[10px] font-black uppercase tracking-[0.25em]">Verified Quotation</span>
+              <div className="pt-6 border-t border-slate-200/70 mt-4">
+                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">
+                  PREPARED FOR
+                </p>
+                <h2 className="text-3xl font-black text-[#0f2942] tracking-tight mt-1">
+                  {clientName}
+                </h2>
               </div>
-              <p className="text-xs font-mono font-bold text-white/90">Ref: #{quotationRef}</p>
-              <p className="text-[11px] text-white/70 font-medium">{issuedDate}</p>
             </div>
           </div>
 
-          {/* Center Title Showcase Card with Frosted Backdrop for 100% Readability */}
-          <div className="my-auto py-4">
-            <div className="max-w-2xl bg-slate-950/40 backdrop-blur-md border border-white/20 rounded-3xl p-8 shadow-2xl space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md border border-white/25 text-white shadow-sm">
-                <MapPin className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                <span className="text-[11px] font-bold uppercase tracking-[0.2em]">
-                  {destination ? `${destination.toUpperCase()} TOUR PACKAGE` : "EXCLUSIVE TRAVEL ITINERARY"}
-                </span>
-              </div>
-
-              <h1 className="text-5xl font-black text-white leading-[1.08] tracking-tight drop-shadow-lg">
-                {tripTitle || (destination ? `${destination} Holiday Package` : "Customized Travel Quotation")}
-              </h1>
-
-              <div className="flex items-center gap-3 text-amber-300 font-bold text-base flex-wrap">
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="w-4 h-4 text-amber-300" />
-                  {duration}
-                </span>
-                <span>•</span>
-                <span className="flex items-center gap-1.5">
-                  <Users className="w-4 h-4 text-amber-300" />
-                  {guestLabel}
-                </span>
-                <span>•</span>
-                <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs uppercase font-extrabold tracking-wider">
-                  {theme || "Custom Tour"}
-                </span>
-              </div>
-
-              <p className="text-xs text-slate-200 leading-relaxed font-normal pt-1 border-t border-white/10">
-                Detailed itinerary proposal including curated accommodations, dedicated chauffeur mobility, daily sightseeing schedule, and transparent all-inclusive package pricing.
-              </p>
-            </div>
-          </div>
-
-          {/* Floating Key Metrics Ribbon */}
-          <div className="grid grid-cols-4 gap-0 rounded-2xl overflow-hidden border border-white/25 bg-white/10 backdrop-blur-md shadow-2xl text-white">
-            <CoverStat icon={<Calendar className="w-4 h-4 text-teal-300" />} label="Duration" value={duration} />
-            <CoverStat icon={<Compass className="w-4 h-4 text-amber-300" />} label="Holiday Type" value={theme || "Holiday"} border />
-            <CoverStat icon={<Users className="w-4 h-4 text-blue-300" />} label="Total Guests" value={guestLabel} border />
-            <CoverStat icon={<Award className="w-4 h-4 text-yellow-300" />} label="Total Investment" value={`₹${price}`} />
-          </div>
-
-          {/* Bottom VIP Traveler Card */}
-          <div className="flex justify-between items-end pt-5 border-t border-white/20">
-            <div>
-              <p className="text-[9px] font-bold uppercase tracking-[0.3em] text-amber-300 mb-1 flex items-center gap-1.5">
-                <BadgeCheck className="w-3.5 h-3.5" />
-                Prepared Exclusively For
-              </p>
-              <p className="text-3xl font-black text-white tracking-tight leading-none drop-shadow-sm">
-                {clientName || "Valued Traveler"}
-              </p>
+          {/* Accreditations & Badges */}
+          <div className="space-y-4">
+            <p className="text-[9px] uppercase tracking-wider text-slate-600 font-semibold">
+              MOT REGISTERED &nbsp;|&nbsp; IATA ACCREDITED &nbsp;|&nbsp; IATO MEMBER &nbsp;|&nbsp; TAAI MEMBER &nbsp;|&nbsp; ADTOI MEMBER &nbsp;|&nbsp; ATOAI MEMBER
+            </p>
+            <div className="flex items-center justify-center gap-7 pt-1 flex-wrap">
+              <MotBadge />
+              <IataBadge />
+              <IatoBadge />
+              <TaaiBadge />
+              <AdtoiBadge />
+              <AtoaiBadge />
             </div>
 
-            <div className="text-right text-xs text-white/90 space-y-1">
-              <p className="font-black text-white text-base tracking-tight">
-                {user?.company_name || "Authorized Travel Specialist"}
+            {/* Contact Details from User Settings */}
+            <div className="pt-6 text-xs text-slate-600 space-y-1 font-medium">
+              <p>
+                {[company.website, company.phone, company.email].filter(Boolean).join(" · ") ||
+                  "Verified Travel Specialist"}
               </p>
-              {user?.company_phone && (
-                <p className="flex items-center justify-end gap-1.5 text-[11px] text-teal-200 font-semibold">
-                  <Phone className="w-3 h-3 text-teal-300" /> Helpline: {user.company_phone}
-                </p>
-              )}
-              {user?.email && (
-                <p className="flex items-center justify-end gap-1.5 text-[11px] text-white/80">
-                  <Mail className="w-3 h-3 text-slate-300" /> {user.email}
-                </p>
-              )}
-              {user?.company_website && (
-                <p className="flex items-center justify-end gap-1.5 text-[11px] text-white/70 font-semibold">
-                  <Globe className="w-3 h-3 text-slate-300" /> {user.company_website}
-                </p>
-              )}
+              {company.address && <p>{company.address}</p>}
             </div>
           </div>
         </div>
+
+        <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. OVERVIEW PAGE: TRIP SNAPSHOT & VISUAL JOURNEY ROUTE                     */}
+      {/* PAGE 2: TOTAL PRICE, CLIENT DETAILS & DAY 1                               */}
       {/* ========================================================================= */}
       <div data-pdf-page className={PAGE}>
-        <RunningHeader
-          user={user}
-          section="Holiday Overview"
-          title="Tour Snapshot & Daily Route"
-          quotationRef={quotationRef}
-          theme={currentTheme}
-        />
+        <div className="p-10 pb-20 space-y-4">
+          <QuotationHeaderMini
+            company={company}
+            quotationRef={quotationRef}
+            quotationDate={quotationDate}
+            validUntilDate={validUntilDate}
+          />
 
-        <div className="px-10 py-6 flex-1 flex flex-col justify-between space-y-5">
-          {/* Quick Snapshot 4-Card Grid */}
-          <div className="grid grid-cols-4 gap-3">
-            <InfoCard icon={<MapPin className="w-4 h-4" />} label="Destination" value={destination || "Scenic Holiday"} variant="blue" />
-            <InfoCard icon={<Calendar className="w-4 h-4" />} label="Travel Dates" value={dateRange} variant="violet" />
-            <InfoCard icon={<Users className="w-4 h-4" />} label="Total Guests" value={guestLabel} variant="emerald" />
-            <InfoCard icon={<Compass className="w-4 h-4" />} label="Holiday Type" value={theme || "Holiday Package"} variant="amber" />
-          </div>
-
-          {/* Large Hero Showcase Image with Journey Badge */}
-          <div className="relative rounded-3xl overflow-hidden shadow-xl border border-slate-200 min-h-[95mm] flex-1">
-            <img
-              src={activeTravelBg}
-              alt=""
-              className="absolute inset-0 w-full h-full object-cover"
-              crossOrigin={getSafeCrossOrigin(activeTravelBg)}
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#040e1d]/95 via-slate-900/40 to-transparent" />
-
-            <div className="absolute bottom-0 left-0 right-0 p-8 text-white flex justify-between items-end">
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 backdrop-blur border border-amber-300/40 text-amber-300 text-[10px] font-bold uppercase tracking-wider mb-2">
-                  <Sparkles className="w-3 h-3" />
-                  <span>Curated Tour Snapshot</span>
+          {/* TOTAL QUOTATION PRICE CARD (Showing Exact Pricing) */}
+          <div className="bg-[#f4f7fb] border border-slate-200/80 rounded-xl p-4 space-y-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+              TOTAL QUOTATION PRICE
+            </h3>
+            <div className="space-y-1 text-xs">
+              {discountAmount > 0 && (
+                <div className="flex justify-between items-center text-slate-700 font-medium">
+                  <span>Discount ({discountPercent}%)</span>
+                  <span className="font-semibold text-slate-900">
+                    -Rs. {discountAmount.toLocaleString("en-IN")}
+                  </span>
                 </div>
-                <p className="text-3xl font-black tracking-tight leading-tight">
-                  {tripTitle || (destination ? `${destination} Holiday Package` : "Confirmed Travel Itinerary")}
+              )}
+              {gstAmount > 0 && (
+                <div className="flex justify-between items-center text-slate-700 font-medium">
+                  <span>GST ({gstRate}%)</span>
+                  <span className="font-semibold text-slate-900">
+                    Rs. {gstAmount.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-200 flex justify-between items-end">
+              <div>
+                <p className="text-xs font-bold text-slate-900 leading-tight">Amount payable</p>
+                <p className="text-[10px] text-slate-400">
+                  {gstAmount > 0 ? `Including GST (${gstRate}%)` : "All inclusive package price"}
                 </p>
-                <p className="text-teal-200 text-sm font-semibold mt-1">
-                  {days.length} Days Itinerary · {duration}
+              </div>
+              <p className="text-2xl font-black text-[#1e3a8a] tracking-tight leading-none">
+                Rs. {formattedPrice}
+              </p>
+            </div>
+          </div>
+
+          {/* 2-Column: PREPARED FOR & PACKAGE DETAILS */}
+          <div className="grid grid-cols-2 gap-6 pt-1 text-xs">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                PREPARED FOR
+              </p>
+              <p className="font-bold text-slate-900 text-sm">{clientName}</p>
+              {clientPhone && <p className="text-slate-600 mt-0.5">Ph: {clientPhone}</p>}
+              {clientEmail && <p className="text-slate-500 text-[11px] mt-0.5">{clientEmail}</p>}
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                PACKAGE DETAILS
+              </p>
+              <div className="space-y-0.5 text-slate-800">
+                <p>
+                  <strong className="text-slate-600 font-medium">Package:</strong>{" "}
+                  <span className="font-bold">
+                    {tripTitle || (destination ? `${destination} Tour Package` : "Confirmed Travel Package")}
+                  </span>
+                </p>
+                <p>
+                  <strong className="text-slate-600 font-medium">Duration:</strong>{" "}
+                  <span className="font-bold">{duration}</span>
+                </p>
+                <p>
+                  <strong className="text-slate-600 font-medium">Guests:</strong>{" "}
+                  <span className="font-bold">{guestCount}</span>
                 </p>
               </div>
-
-              <div className="text-right">
-                <p className="text-[10px] uppercase font-bold tracking-widest text-slate-300">Total Investment</p>
-                <p className="text-4xl font-black text-amber-300">₹{price}</p>
-              </div>
             </div>
           </div>
 
-          {/* Visual Route Timeline Map */}
-          {days.length > 0 && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-2.5">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-700 flex items-center gap-1.5">
-                  <Map className="w-4 h-4 text-teal-600" />
-                  Journey Route & Daily Sequence
-                </p>
-                <span className="text-[11px] font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">
-                  {days.length} Stops Total
-                </span>
-              </div>
+          {/* DAY-WISE ITINERARY (Day 1) */}
+          <div className="pt-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a] mb-3">
+              DAY-WISE ITINERARY
+            </h3>
 
-              <div className="flex items-center gap-2 overflow-x-hidden pt-1 flex-wrap">
-                {days.map((d, i) => (
-                  <div key={d.day} className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-800 shadow-2xs hover:border-teal-300 transition-colors">
-                      <span className="w-5 h-5 rounded-md bg-teal-700 text-white text-[10px] font-bold flex items-center justify-center">
-                        {d.day}
-                      </span>
-                      <span className="text-xs font-bold text-slate-900 truncate max-w-[130px]">
-                        {d.destination || d.title || `Day ${d.day}`}
-                      </span>
-                    </div>
-                    {i < days.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 4 Pillars of Confidence Strip */}
-          <div className="grid grid-cols-4 gap-3 pt-1">
-            <PillarCard icon={<Hotel className="w-4 h-4 text-teal-600" />} title="Curated Stays" desc="Handpicked verified hotels" />
-            <PillarCard icon={<Car className="w-4 h-4 text-emerald-600" />} title="Private Transfers" desc="Dedicated vehicle & chauffeur" />
-            <PillarCard icon={<Compass className="w-4 h-4 text-blue-600" />} title="Sightseeing Included" desc="All planned attractions" />
-            <PillarCard icon={<ShieldCheck className="w-4 h-4 text-amber-600" />} title="On-Trip Support" desc="24/7 dedicated helpline" />
-          </div>
-        </div>
-
-        <RunningFooter user={user} pageNumber={overviewPageNum} />
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 3. ACCOMMODATION PAGE (HOTELS)                                            */}
-      {/* ========================================================================= */}
-      {validHotels.length > 0 && (
-        <div data-pdf-page className={PAGE}>
-          <RunningHeader
-            user={user}
-            section="Accommodation"
-            title="Curated Stays & Luxury Hotels"
-            quotationRef={quotationRef}
-            theme={currentTheme}
-          />
-
-          <div className="px-10 py-5 space-y-4 flex-1">
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                Confirmed Accommodations ({validHotels.length} Properties)
-              </span>
-              <span className="text-[11px] text-teal-700 font-semibold bg-teal-50 px-2 py-0.5 rounded border border-teal-100">
-                Verified Clean & Sanitized Stays
-              </span>
-            </div>
-
-            {validHotels.map((hotel, i) => (
-              <HotelCard key={i} hotel={hotel} index={i} theme={currentTheme} />
-            ))}
-          </div>
-
-          <RunningFooter user={user} pageNumber={hotelPageNum || undefined} />
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 4. TRANSFERS & MOBILITY PAGE                                              */}
-      {/* ========================================================================= */}
-      {validTransports.length > 0 && (
-        <div data-pdf-page className={PAGE}>
-          <RunningHeader
-            user={user}
-            section="Transfers & Mobility"
-            title="Private Chauffeur & Vehicles"
-            quotationRef={quotationRef}
-            theme={currentTheme}
-          />
-
-          <div className="px-10 py-5 space-y-4 flex-1">
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                Dedicated Chauffeur & Sightseeing Vehicles
-              </span>
-              <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
-                100% Private Fleet
-              </span>
-            </div>
-
-            {validTransports.map((transport, i) => (
-              <TransportCard key={i} transport={transport} index={i} theme={currentTheme} />
-            ))}
-          </div>
-
-          <RunningFooter user={user} pageNumber={transportPageNum || undefined} />
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 5. FLIGHT SCHEDULE PAGE                                                  */}
-      {/* ========================================================================= */}
-      {validFlights.length > 0 && (
-        <div data-pdf-page className={PAGE}>
-          <RunningHeader
-            user={user}
-            section="Flight Itinerary"
-            title="Confirmed Air Travel Schedule"
-            quotationRef={quotationRef}
-            theme={currentTheme}
-          />
-
-          <div className="px-10 py-5 space-y-4 flex-1">
-            {validFlights.map((flight, i) => (
-              <FlightTicketCard key={i} flight={flight} index={i} />
-            ))}
-          </div>
-
-          <RunningFooter user={user} pageNumber={flightPageNum || undefined} />
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 6. CUSTOM SERVICES (BUS, TRAIN, FERRY, VISA, EXCURSIONS)                  */}
-      {/* ========================================================================= */}
-      {validServices.length > 0 && (
-        <div data-pdf-page className={PAGE}>
-          <RunningHeader
-            user={user}
-            section="Additional Bookings"
-            title="Custom Services & Special Entities"
-            quotationRef={quotationRef}
-            theme={currentTheme}
-          />
-
-          <div className="px-10 py-5 space-y-4 flex-1">
-            {validServices.map((service, i) => (
-              <CustomServiceCard key={i} service={service} index={i} />
-            ))}
-          </div>
-
-          <RunningFooter user={user} pageNumber={servicesPageNum || undefined} />
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 7. DAY BY DAY ITINERARY PAGES: EDITORIAL MAGAZINE DESIGN                  */}
-      {/* ========================================================================= */}
-      {days.map((day, dayIndex) => {
-        const hasDayHeroImage = day.images && day.images[0]?.trim();
-        const extraImages = day.images && day.images.length > 1 ? day.images.slice(1, 3).filter(Boolean) : [];
-        const currentPageNum = dayPageStart + dayIndex;
-
-        return (
-          <div key={day.day} data-pdf-page className={PAGE}>
-            <RunningHeader
-              user={user}
-              section={`Daily Schedule · Day ${day.day}`}
-              title={day.destination ? `${day.destination}` : `Day ${day.day}`}
-              quotationRef={quotationRef}
-              theme={currentTheme}
-            />
-
-            {/* Day Hero Banner */}
-            {hasDayHeroImage ? (
-              <div className="relative h-[80mm] w-full overflow-hidden border-b border-slate-200">
-                <img
-                  src={day.images[0]}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  crossOrigin={getSafeCrossOrigin(day.images[0])}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#051121]/95 via-slate-900/40 to-slate-900/30" />
-                <DayHeroBanner day={day.day} title={day.title} destination={day.destination} variant="image" />
-              </div>
+            {activeDays.length > 0 ? (
+              <DaySectionItem day={activeDays[0]} isFirst />
             ) : (
-              <div className="relative h-[48mm] w-full bg-gradient-to-br from-slate-900 via-teal-950 to-slate-800 overflow-hidden border-b border-slate-200">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(20,184,166,0.25),transparent)]" />
-                <DayHeroBanner day={day.day} title={day.title} destination={day.destination} variant="gradient" />
+              <div className="p-4 rounded-xl border border-dashed border-slate-300 text-center text-slate-500 text-xs">
+                Detailed day-wise schedule will be added to this quotation proposal.
               </div>
             )}
+          </div>
+        </div>
 
-            {/* Day Content Body with High-Contrast Typography & Structured Cards */}
-            <div className="px-10 py-6 space-y-4 flex-1 relative flex flex-col justify-between">
-              {/* Background Watermark Day Number */}
-              <div className="absolute right-10 top-2 text-[120px] font-black text-slate-100/70 leading-none select-none pointer-events-none -z-10">
-                {String(day.day).padStart(2, "0")}
-              </div>
+        <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
+      </div>
 
-              <div className="space-y-4">
-                {/* Experiences & Activities Highlight Card */}
-                {day.activities?.trim() && (
-                  <div className="rounded-2xl border border-teal-200/80 bg-gradient-to-r from-teal-50/80 to-white p-4 shadow-2xs">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <div className="w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center shadow-2xs">
-                        <Sparkles className="w-3 h-3" />
-                      </div>
-                      <p className="text-[10px] font-black uppercase tracking-wider text-teal-900">
-                        Sightseeing Highlights & Key Activities
-                      </p>
-                    </div>
-                    <p className="text-sm font-bold text-slate-900 leading-relaxed pl-7">
-                      {day.activities}
-                    </p>
-                  </div>
-                )}
+      {/* ========================================================================= */}
+      {/* PAGES 3..N: REMAINING DAYS (2 DAYS PER PAGE - EXACT USER DAYS)             */}
+      {/* ========================================================================= */}
+      {dayPairs.map((pair, pIdx) => {
+        const isLastDayPage = pIdx === dayPairs.length - 1;
+        return (
+          <div key={pIdx} data-pdf-page className={PAGE}>
+            <div className="p-10 pb-20 space-y-6">
+              {pair.map((day) => (
+                <DaySectionItem key={day.day} day={day} />
+              ))}
 
-                {/* Day Highlights Section (Chips / Grid) */}
-                {day.highlights && day.highlights.length > 0 ? (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
-                      Key Features
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {day.highlights.filter(Boolean).map((h, hIdx) => (
-                        <div
-                          key={hIdx}
-                          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 shadow-2xs"
-                        >
-                          <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
-                          <span className="truncate">{h}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {/* Day Description Body: Clean, High-Contrast & Highly Readable */}
-                {day.description?.trim() && (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                      <Bookmark className="w-3.5 h-3.5 text-teal-600" />
-                      Detailed Day Itinerary
-                    </p>
-                    <div className="text-[13.5px] text-slate-800 leading-[1.65] font-normal whitespace-pre-line bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs">
-                      {day.description}
-                    </div>
-                  </div>
-                )}
-
-                {/* Additional Photos Gallery */}
-                {extraImages.length > 0 && (
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    {extraImages.map((img, i) => (
-                      <div key={i} className="rounded-2xl overflow-hidden h-32 shadow-sm border border-slate-200">
-                        <img
-                          src={img}
-                          alt=""
-                          className="w-full h-full object-cover"
-                          crossOrigin={getSafeCrossOrigin(img)}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Day Services Strip Footer */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 flex items-center justify-between text-xs text-slate-700 font-semibold shadow-2xs">
-                <div className="flex items-center gap-2">
-                  <Hotel className="w-4 h-4 text-teal-600" />
-                  <span>Stay: <strong className="text-slate-900">{day.destination || "Confirmed Accommodation"}</strong></span>
+              {isLastDayPage && hasAccommodationOrServices && (
+                <div className="pt-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                    ACCOMMODATION &amp; SERVICES
+                  </h3>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Car className="w-4 h-4 text-emerald-600" />
-                  <span>Mobility: <strong className="text-slate-900">Private Chauffeur Included</strong></span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Utensils className="w-4 h-4 text-amber-600" />
-                  <span>Meals: <strong className="text-slate-900">Breakfast Included</strong></span>
-                </div>
-              </div>
+              )}
             </div>
 
-            <RunningFooter user={user} pageNumber={currentPageNum} />
+            <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
           </div>
         );
       })}
 
       {/* ========================================================================= */}
-      {/* 8. SUMMARY, INVESTMENT & TERMS PAGE                                       */}
+      {/* PAGE: ACCOMMODATIONS, TRANSPORT & ACTIVITIES                              */}
       {/* ========================================================================= */}
-      <div data-pdf-page className={PAGE}>
-        <RunningHeader
-          user={user}
-          section="Package Summary"
-          title="Investment, Inclusions & Terms"
-          quotationRef={quotationRef}
-          theme={currentTheme}
-        />
+      {hasAccommodationOrServices && (
+        <div data-pdf-page className={PAGE}>
+          <div className="p-10 pb-20 space-y-5">
+            {/* Hotels List (Only Rendered if User Added Hotels) */}
+            {activeHotels.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                  ACCOMMODATION
+                </h3>
+                {activeHotels.map((hotel, hIdx) => {
+                  const nightLabels = [`${hIdx + 1}${getOrdinalSuffix(hIdx + 1)}`];
+                  const hotelPhoto =
+                    hotel.amenities?.startsWith("http") ? hotel.amenities : null;
 
-        <div className="px-10 py-6 flex-1 flex flex-col justify-between space-y-5">
-          {/* Inclusions & Exclusions Side by Side */}
-          <div className="grid grid-cols-2 gap-5">
-            <ListSection
-              title="Package Inclusions"
-              items={inclusions}
-              icon={<CheckCircle2 className="w-5 h-5 text-emerald-600" />}
-              accent="emerald"
-            />
-            <ListSection
-              title="Package Exclusions"
-              items={exclusions}
-              icon={<XCircle className="w-5 h-5 text-rose-500" />}
-              accent="rose"
-            />
-          </div>
+                  return (
+                    <div
+                      key={hIdx}
+                      className="space-y-2 pb-3 border-b border-slate-150 last:border-0 last:pb-0"
+                    >
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                        {nightLabels.map((nl) => (
+                          <span
+                            key={nl}
+                            className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-semibold"
+                          >
+                            {nl}
+                          </span>
+                        ))}
+                        <span className="font-bold text-slate-900 ml-1">
+                          Nights at {hotel.location || "Confirmed City"}
+                        </span>
+                      </div>
 
-          {/* Total Investment Showcase Card (High Impact Luxury Badge) */}
-          <div className="relative rounded-3xl overflow-hidden shadow-2xl border border-slate-800">
-            {/* Deep Midnight Blue Gradient */}
-            <div className="absolute inset-0 bg-gradient-to-br from-[#06111f] via-[#091a33] to-[#0e274a]" />
-            <div className={`absolute top-0 left-0 right-0 h-2 bg-gradient-to-r ${currentTheme.ribbon} shadow-md`} />
+                      {(hotel.checkIn || hotel.checkOut) && (
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          Check-in: {formatPdfDateTime(hotel.checkIn, "14:00")} &nbsp;|&nbsp; Check-out:{" "}
+                          {formatPdfDateTime(hotel.checkOut, "11:00")}
+                        </p>
+                      )}
 
-            <div className="relative px-8 py-7 text-center text-white space-y-2.5">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-400/30 text-amber-300 text-[10px] font-bold uppercase tracking-[0.25em]">
-                <Award className="w-3.5 h-3.5" />
-                <span>Transparent All-Inclusive Pricing</span>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-2 flex-1">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900">{hotel.hotelName}</h4>
+                            {hotel.starRating && (
+                              <p className="text-xs text-amber-500 font-bold tracking-widest mt-0.5">
+                                {renderStarRating(hotel.starRating)}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4 text-xs pt-1">
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                ROOMS
+                              </p>
+                              <p className="font-semibold text-slate-900">
+                                {hotel.rooms || 1} {hotel.roomCategory || "standard"}
+                              </p>
+                              <p className="text-[11px] text-slate-600">
+                                {hotel.rooms || 1} Room(s) · {hotel.nights || 1} Night(s)
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                MEAL PLAN
+                              </p>
+                              <p className="font-bold text-slate-900 uppercase">
+                                {hotel.mealPlan || "Room Only"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {hotelPhoto && (
+                          <div className="w-44 h-28 shrink-0 overflow-hidden rounded-sm border border-slate-200">
+                            <img
+                              src={hotelPhoto}
+                              alt={hotel.hotelName}
+                              className="w-full h-full object-cover"
+                              crossOrigin={getSafeCrossOrigin(hotelPhoto)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+            )}
 
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-300">Total Net Investment</p>
-                <p className="text-6xl font-black tracking-tight text-white mt-0.5">₹{price}</p>
-              </div>
-
-              <div className="flex items-center justify-center gap-3 text-slate-300 text-xs font-semibold">
-                <span>{guestLabel}</span>
-                <span>•</span>
-                <span>All Hotels, Private Transport & Sightseeing Included</span>
-                <span>•</span>
-                <span className="text-emerald-300">GST Included</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Client Notes & Important Remarks */}
-          {clientNotes?.trim() && (
-            <div className="rounded-2xl bg-amber-50/90 border-l-4 border-amber-500 p-4 space-y-1 shadow-2xs">
-              <p className="text-[10px] font-black uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-amber-700" />
-                Important Remarks & Booking Policies
-              </p>
-              <p className="text-xs text-slate-800 leading-relaxed font-medium">{clientNotes}</p>
-            </div>
-          )}
-
-          {/* Agency Signature & Verification Seal Bar */}
-          <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <BrandMark user={user} variant="dark" />
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <p className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                    {user?.company_name || "Authorized Travel Specialist"}
-                  </p>
+            {/* TRANSPORT Table (Only Rendered if User Added Transport) */}
+            {activeTransports.length > 0 && (
+              <div className="space-y-2 pt-1">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                  TRANSPORT
+                </h3>
+                <div className="border border-slate-200 rounded-sm overflow-hidden text-xs">
+                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[11px]">
+                    <div className="w-8">#</div>
+                    <div className="w-32">Vehicle Type</div>
+                    <div className="flex-1">Vehicle Info / Notes</div>
+                    <div className="w-32">Route &amp; Dates</div>
+                    <div className="w-20 text-right">Qty</div>
+                  </div>
+                  {activeTransports.map((t, idx) => (
+                    <div
+                      key={idx}
+                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center"
+                    >
+                      <div className="w-8 text-slate-500 font-medium">{idx + 1}</div>
+                      <div className="w-32 font-medium capitalize text-slate-800">
+                        {t.vehicleType || "Private Vehicle"}
+                      </div>
+                      <div className="flex-1 text-slate-700 whitespace-pre-line text-[11px] leading-snug">
+                        {t.notes || "Dedicated Chauffeur"}
+                      </div>
+                      <div className="w-32 text-slate-500 font-medium">{t.route || "--"}</div>
+                      <div className="w-20 text-right font-medium text-slate-800">
+                        {t.vehiclesCount ? `${t.vehiclesCount} Unit(s)` : "1"}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <p className="text-[10px] text-slate-500 font-medium">Verified Quotation Document · Valid for 7 days</p>
               </div>
-            </div>
+            )}
 
-            <div className="text-right text-xs text-slate-700 space-y-1">
-              {user?.company_phone && (
-                <p className="flex items-center justify-end gap-1.5 font-bold text-slate-900">
-                  <Phone className="w-3.5 h-3.5 text-teal-600" /> {user.company_phone}
-                </p>
-              )}
-              {user?.email && (
-                <p className="flex items-center justify-end gap-1.5 text-[11px] text-slate-500">
-                  <Mail className="w-3.5 h-3.5 text-slate-400" /> {user.email}
-                </p>
-              )}
-              {user?.company_website && (
-                <p className="flex items-center justify-end gap-1.5 text-[11px] text-teal-700 font-bold">
-                  <Globe className="w-3.5 h-3.5 text-teal-600" /> {user.company_website}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
+            {/* ACTIVITIES & EXCURSIONS Table (Only Rendered if User Added Sightseeings) */}
+            {activeActivities.length > 0 && (
+              <div className="space-y-2 pt-1">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                  ACTIVITIES &amp; EXCURSIONS
+                </h3>
+                <div className="border border-slate-200 rounded-sm overflow-hidden text-xs">
+                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[11px]">
+                    <div className="w-8">#</div>
+                    <div className="flex-1">Activity</div>
+                    <div className="w-48">Location</div>
+                    <div className="w-32">Date</div>
+                    <div className="w-16 text-right">Pax</div>
+                  </div>
+                  {activeActivities.map((act, idx) => (
+                    <div
+                      key={idx}
+                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center"
+                    >
+                      <div className="w-8 text-slate-500 font-medium">{idx + 1}</div>
+                      <div className="flex-1 font-semibold text-slate-900 capitalize">{act.title}</div>
+                      <div className="w-48 text-slate-600 capitalize">{act.city || "--"}</div>
+                      <div className="w-32 text-slate-500">{act.date || quotationDate}</div>
+                      <div className="w-16 text-right font-medium text-slate-800">{act.pax || 1}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-        <RunningFooter user={user} pageNumber={summaryPageNum} />
-      </div>
-    </div>
-  );
-}
-
-// =========================================================================
-// HELPER COMPONENTS & CARDS
-// =========================================================================
-
-function BrandMark({ user, variant }: { user?: User | null; variant: "light" | "dark" }) {
-  const isLight = variant === "light";
-  return user?.company_logo ? (
-    <img
-      src={user.company_logo}
-      alt=""
-      className={`h-11 w-auto object-contain ${isLight ? "brightness-0 invert drop-shadow-md" : ""}`}
-      crossOrigin={getSafeCrossOrigin(user.company_logo)}
-    />
-  ) : (
-    <div
-      className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-xl shadow-md ${
-        isLight
-          ? "bg-white/20 backdrop-blur-md border border-white/30 text-white"
-          : "bg-teal-700 text-white"
-      }`}
-    >
-      {user?.company_name?.charAt(0) || "T"}
-    </div>
-  );
-}
-
-function RunningHeader({
-  user,
-  section,
-  title,
-  quotationRef,
-  theme,
-}: {
-  user?: User | null;
-  section: string;
-  title: string;
-  quotationRef?: string;
-  theme: typeof THEME_PALETTES["teal"];
-}) {
-  return (
-    <div className="shrink-0 border-b border-slate-200 bg-white shadow-2xs">
-      <div className={`h-1.5 bg-gradient-to-r ${theme.gradient}`} />
-      <div className="px-10 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center text-xs font-black shadow-xs">
-            {user?.company_name?.charAt(0) || "T"}
-          </div>
-          <div>
-            <p className="text-[8px] font-black uppercase tracking-[0.25em] text-slate-400">{section}</p>
-            <h2 className="text-xl font-black text-slate-900 tracking-tight leading-tight">{title}</h2>
-          </div>
-        </div>
-        <div className="text-right text-[10px]">
-          <span className="font-mono font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-            Ref: #{quotationRef || "QT-PROPOSAL"}
-          </span>
-          <p className="text-[9px] uppercase tracking-wider text-slate-400 mt-1 font-bold">
-            {user?.company_name || "Travel Partner"}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RunningFooter({ user, pageNumber }: { user?: User | null; pageNumber?: number }) {
-  return (
-    <div className="absolute bottom-0 left-0 right-0 px-10 py-2.5 flex justify-between items-center text-[8px] text-slate-400 uppercase tracking-[0.2em] border-t border-slate-100 bg-white/95">
-      <div className="flex items-center gap-2">
-        <span className="font-bold text-slate-700">{user?.company_name || "Travel Partner"}</span>
-        <span>•</span>
-        <span>Confidential Travel Proposal</span>
-      </div>
-      <div className="flex items-center gap-3">
-        {user?.company_phone && <span>Helpline: {user.company_phone}</span>}
-        {user?.company_website && <span>{user.company_website}</span>}
-        {pageNumber && (
-          <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded">
-            Page {pageNumber}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CoverStat({
-  icon,
-  label,
-  value,
-  border,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  border?: boolean;
-  theme?: any;
-}) {
-  return (
-    <div className={`p-4 text-center ${border ? "border-x border-white/15" : ""}`}>
-      <div className="flex justify-center mb-1">{icon}</div>
-      <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-white/60 mb-0.5">{label}</p>
-      <p className="text-xs font-extrabold text-white leading-snug truncate px-1">{value}</p>
-    </div>
-  );
-}
-
-function InfoCard({
-  icon,
-  label,
-  value,
-  variant,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  variant: "blue" | "violet" | "emerald" | "amber";
-}) {
-  const styles = {
-    blue: "from-blue-50 to-white border-blue-200 text-blue-700",
-    violet: "from-indigo-50 to-white border-indigo-200 text-indigo-700",
-    emerald: "from-emerald-50 to-white border-emerald-200 text-emerald-700",
-    amber: "from-amber-50 to-white border-amber-200 text-amber-700",
-  };
-  return (
-    <div className={`rounded-2xl border p-3.5 bg-gradient-to-br shadow-2xs ${styles[variant]}`}>
-      <div className="mb-1.5 opacity-90">{icon}</div>
-      <p className="text-[8px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">{label}</p>
-      <p className="text-xs font-black text-slate-900 leading-snug truncate">{value}</p>
-    </div>
-  );
-}
-
-function PillarCard({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
-  return (
-    <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-1">
-      <div className="flex items-center gap-1.5">
-        {icon}
-        <p className="text-xs font-black text-slate-900">{title}</p>
-      </div>
-      <p className="text-[10px] text-slate-500 leading-tight">{desc}</p>
-    </div>
-  );
-}
-
-function HotelCard({
-  hotel,
-  index,
-  theme,
-}: {
-  hotel: ItineraryHotel;
-  index: number;
-  theme: typeof THEME_PALETTES["teal"];
-}) {
-  const starNum = parseInt(hotel.starRating || "3") || 3;
-  const starsString = "★".repeat(Math.min(5, Math.max(1, starNum)));
-
-  const amenitiesList = (hotel.amenities || "")
-    .split(/[,•\n]/)
-    .map((a) => a.trim())
-    .filter(Boolean);
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      {/* Top Banner */}
-      <div className={`flex items-center justify-between p-4 bg-gradient-to-r ${theme.gradient} text-white`}>
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center text-white shrink-0 shadow-2xs">
-            <Hotel className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-base font-black truncate">{hotel.hotelName || `Stay Option ${index + 1}`}</p>
-            <p className="text-xs text-white/90 truncate flex items-center gap-1 font-medium">
-              <MapPin className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-              <span>{hotel.location || "Prime City Location"}</span>
-            </p>
-          </div>
-        </div>
-
-        <div className="text-right shrink-0">
-          <div className="text-amber-300 tracking-widest text-xs font-black drop-shadow-2xs">{starsString}</div>
-          <span className="inline-block mt-0.5 px-2 py-0.5 rounded-full bg-white/20 text-[9px] font-bold text-white uppercase border border-white/30">
-            {hotel.starRating || "Standard"}
-          </span>
-        </div>
-      </div>
-
-      {/* Info Grid with Crisp Borders */}
-      <div className="p-4 grid grid-cols-4 gap-3 bg-slate-50/60 border-b border-slate-100">
-        <PdfCell label="Check-in Date" value={formatPdfDate(hotel.checkIn)} />
-        <PdfCell label="Check-out Date" value={formatPdfDate(hotel.checkOut)} />
-        <PdfCell
-          label="Stay Duration"
-          value={`${hotel.rooms || 1} Room${(hotel.rooms || 1) > 1 ? "s" : ""} · ${hotel.nights || 1} Night${
-            (hotel.nights || 1) > 1 ? "s" : ""
-          }`}
-          highlight
-        />
-        <PdfCell label="Room Category" value={hotel.roomCategory || "Deluxe Room"} />
-      </div>
-
-      <div className="px-4 py-3 flex items-center justify-between text-xs bg-white">
-        <div className="flex items-center gap-2 text-slate-800 font-bold">
-          <Coffee className="w-4 h-4 text-teal-600" />
-          <span>Meal Plan: <strong className="text-teal-700">{hotel.mealPlan || "Room Only (EP)"}</strong></span>
-        </div>
-
-        {amenitiesList.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            {amenitiesList.slice(0, 3).map((amenity, aIdx) => (
-              <span
-                key={aIdx}
-                className="px-2 py-0.5 rounded-md bg-teal-50 border border-teal-200 text-[10px] font-bold text-teal-800 flex items-center gap-1"
-              >
-                <Check className="w-2.5 h-2.5 text-teal-600" /> {amenity}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TransportCard({
-  transport,
-  index,
-  theme,
-}: {
-  transport: ItineraryTransport;
-  index: number;
-  theme: typeof THEME_PALETTES["teal"];
-}) {
-  const inclusions = transport.inclusions || [
-    "Driver Allowance",
-    "Tolls & State Taxes",
-    "Fuel Charges",
-    "Parking Fees",
-  ];
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden flex">
-      {/* Side Icon Column */}
-      <div className={`w-16 bg-gradient-to-b ${theme.gradient} flex flex-col items-center justify-center text-white shrink-0 p-2 text-center`}>
-        <Car className="w-6 h-6 mb-1 opacity-90" />
-        <span className="text-[9px] font-black uppercase tracking-wider">#{index + 1}</span>
-      </div>
-
-      <div className="flex-1 p-4 space-y-3">
-        {/* Top Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-          <div>
-            <span className="text-[9px] font-bold uppercase tracking-wider text-teal-700">Dedicated Chauffeur Vehicle</span>
-            <p className="text-base font-black text-slate-900">{transport.vehicleType || "Private Vehicle Mobility"}</p>
-          </div>
-          <div className="text-right">
-            <span className="text-xs font-bold text-slate-800">{formatPdfDate(transport.date)}</span>
-            {transport.pickupTime && (
-              <p className="text-[10px] text-slate-500 font-semibold flex items-center justify-end gap-1">
-                <Clock className="w-3 h-3 text-teal-600" /> Pickup: {transport.pickupTime}
-              </p>
+            {/* Inclusions & Exclusions */}
+            {(activeInclusions.length > 0 || activeExclusions.length > 0) && (
+              <div className="grid grid-cols-2 gap-4 pt-2">
+                {activeInclusions.length > 0 && (
+                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 mb-2">
+                      INCLUSIONS
+                    </p>
+                    <ul className="space-y-1 text-xs text-slate-700">
+                      {activeInclusions.map((inc, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className="text-emerald-600 font-bold">•</span>
+                          <span>{inc}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {activeExclusions.length > 0 && (
+                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-rose-800 mb-2">
+                      EXCLUSIONS
+                    </p>
+                    <ul className="space-y-1 text-xs text-slate-700">
+                      {activeExclusions.map((exc, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className="text-rose-500 font-bold">•</span>
+                          <span>{exc}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             )}
           </div>
-        </div>
 
-        {/* Route Visual Line */}
-        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-bold text-slate-900">
-          <div className="flex items-center gap-1.5 truncate">
-            <MapPin className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-            <span className="truncate">{transport.route || "Sightseeing / Transfer Route"}</span>
-          </div>
-          {transport.dropoff && (
-            <div className="text-[11px] text-slate-600 font-medium truncate">
-              Drop: {transport.dropoff}
+          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* PAGE: PAYMENT DETAILS (Showing User's Actual Bank & UPI Settings)          */}
+      {/* ========================================================================= */}
+      {hasPaymentDetails && (
+        <div data-pdf-page className={PAGE}>
+          <div className="p-10 pb-20 space-y-6">
+            {/* PAYMENT DETAILS */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                PAYMENT DETAILS
+              </h3>
+
+              <div className="flex items-start justify-between gap-6 bg-white pt-1">
+                <div className="space-y-1.5 text-xs text-slate-700">
+                  {company.accountHolder && (
+                    <p>
+                      <span className="text-slate-500 font-medium">Account Holder:</span>{" "}
+                      <strong className="text-slate-900">{company.accountHolder}</strong>
+                    </p>
+                  )}
+                  {company.bankName && (
+                    <p>
+                      <span className="text-slate-500 font-medium">Bank Name:</span>{" "}
+                      <strong className="text-slate-900">{company.bankName}</strong>
+                    </p>
+                  )}
+                  {company.accountNumber && (
+                    <p>
+                      <span className="text-slate-500 font-medium">Account Number:</span>{" "}
+                      <strong className="font-mono text-slate-900">{company.accountNumber}</strong>
+                    </p>
+                  )}
+                  {company.ifsc && (
+                    <p>
+                      <span className="text-slate-500 font-medium">IFSC Code:</span>{" "}
+                      <strong className="font-mono text-slate-900">{company.ifsc}</strong>
+                    </p>
+                  )}
+                  {company.upiId && (
+                    <p>
+                      <span className="text-slate-500 font-medium">UPI ID:</span>{" "}
+                      <strong className="font-mono text-slate-900">{company.upiId}</strong>
+                    </p>
+                  )}
+                  {company.phone && (
+                    <p>
+                      <span className="text-slate-500 font-medium">UPI Phone:</span>{" "}
+                      <strong className="font-mono text-slate-900">{company.phone}</strong>
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-3">
+                    <span className="text-slate-400 font-medium text-[11px]">Supports:</span>
+                    <PaytmBadge />
+                    <GpayBadge />
+                    <PhonePeBadge />
+                  </div>
+                </div>
+
+                {/* QR Code Generated with User's UPI ID */}
+                {company.upiId && (
+                  <div className="flex flex-col items-center shrink-0">
+                    <div className="p-2 border border-slate-300 rounded-lg bg-white shadow-2xs">
+                      <UpiPaymentQr size={135} upiId={company.upiId} />
+                    </div>
+                    <span className="text-[9px] text-slate-400 font-medium mt-1">Scan &amp; Pay via UPI</span>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+
+            {/* Terms & Client Notes */}
+            {clientNotes && (
+              <div className="pt-4 border-t border-slate-200 space-y-1">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                  TERMS &amp; SPECIAL NOTES
+                </h4>
+                <p className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  {clientNotes}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
         </div>
+      )}
 
-        {/* Inclusions Chips */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {inclusions.slice(0, 4).map((inc, iIdx) => (
-            <span
-              key={iIdx}
-              className="px-2 py-0.5 rounded-md bg-emerald-50 text-[10px] font-bold text-emerald-800 border border-emerald-200 flex items-center gap-1"
-            >
-              <Check className="w-2.5 h-2.5 text-emerald-600" /> {inc}
-            </span>
-          ))}
-          {transport.notes?.trim() && (
-            <span className="text-[10px] text-slate-500 italic ml-auto truncate max-w-xs font-medium">
-              Note: {transport.notes}
-            </span>
-          )}
+      {/* ========================================================================= */}
+      {/* PAGE: GUEST PICTURES / DESTINATION SHOWCASE                               */}
+      {/* ========================================================================= */}
+      {hasGuestPhotos && (
+        <div data-pdf-page className={PAGE}>
+          <div className="h-full flex flex-col justify-between items-center p-10 pb-20 text-center">
+            <h2 className="text-2xl font-bold text-slate-800 tracking-tight pt-2">
+              Our Guest pictures
+            </h2>
+
+            {/* Large Center Guest Photo */}
+            <div className="my-auto max-w-[170mm] max-h-[195mm] overflow-hidden rounded-sm border border-slate-200 shadow-md">
+              <img
+                src={guestPhotos[0] || heroImage}
+                alt="Our Guests"
+                className="w-full h-full object-cover max-h-[195mm]"
+                crossOrigin={getSafeCrossOrigin(guestPhotos[0] || heroImage)}
+              />
+            </div>
+
+            <div className="pt-2 text-center text-xs text-slate-400">
+              <p>
+                Generated by {company.name || "Authorized Travel Partner"} &nbsp;|&nbsp; {quotationDate}
+              </p>
+            </div>
+          </div>
+
+          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function FlightTicketCard({ flight, index }: { flight: ItineraryFlight; index: number }) {
-  return (
-    <div className="rounded-2xl border border-blue-200 bg-white shadow-sm overflow-hidden flex">
-      <div className="w-16 bg-gradient-to-b from-blue-700 to-indigo-800 flex flex-col items-center justify-center text-white shrink-0 p-2 text-center">
-        <Plane className="w-6 h-6 mb-1 opacity-90" />
-        <span className="text-[9px] font-black uppercase tracking-wider">Flight #{index + 1}</span>
-      </div>
+// =========================================================================
+// HELPER COMPONENTS & LOGOS
+// =========================================================================
 
-      <div className="flex-1 p-4 grid grid-cols-4 gap-3 items-center">
-        <PdfCell label="Airline / Flight" value={flight.flightNo || flight.airline || "Scheduled Flight"} highlight />
-        <PdfCell label="Travel Date" value={formatPdfDate(flight.date)} />
-        <PdfCell label="Route" value={`${flight.departure || "Origin"} ➔ ${flight.arrival || "Dest"}`} highlight />
-        <PdfCell label="Baggage" value={flight.baggage || "15 kg Check-in"} />
-      </div>
-    </div>
-  );
-}
-
-function CustomServiceCard({ service, index }: { service: ItineraryService; index: number }) {
-  return (
-    <div className="rounded-2xl border border-purple-200 bg-white shadow-sm overflow-hidden flex">
-      <div className="w-16 bg-gradient-to-b from-purple-700 to-indigo-800 flex flex-col items-center justify-center text-white shrink-0 p-2 text-center">
-        <Layers className="w-6 h-6 mb-1 opacity-90" />
-        <span className="text-[8px] font-black uppercase tracking-wider truncate max-w-full">
-          {service.category || "Service"}
-        </span>
-      </div>
-
-      <div className="flex-1 p-4 grid grid-cols-4 gap-3 items-center">
-        <PdfCell label={service.category || "Service Name"} value={service.title || "—"} highlight />
-        <PdfCell label="Details / Remarks" value={service.details || service.notes || "—"} className="col-span-2" />
-        <PdfCell
-          label="Date / Quantity"
-          value={
-            [service.date ? formatPdfDate(service.date) : "", service.quantity ? `Qty: ${service.quantity}` : ""]
-              .filter(Boolean)
-              .join(" · ") || "—"
-          }
-        />
-      </div>
-    </div>
-  );
-}
-
-function DayHeroBanner({
-  day,
-  title,
-  destination,
-  variant,
+function QuotationPageFooter({
+  pageNum,
+  totalPages,
+  company,
 }: {
-  day: number;
-  title: string;
-  destination?: string;
-  variant: "image" | "gradient";
+  pageNum: number;
+  totalPages: number;
+  company: {
+    website?: string;
+    phone?: string;
+    instagram?: string;
+    facebook?: string;
+  };
 }) {
-  const isImage = variant === "image";
   return (
-    <div className="absolute bottom-5 left-10 right-10 flex items-end justify-between">
-      <div className="flex items-end gap-3.5">
-        {/* Floating Day Badge */}
+    <>
+      <div className="absolute bottom-8 left-0 right-0 text-center text-[9.5px] text-slate-400 font-normal">
+        This quotation is valid until the date mentioned above. Prices are subject to availability.
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 h-7 bg-[#0b5c53] text-white flex items-center justify-between px-6 text-[9.5px] font-medium tracking-tight">
+        <div className="flex items-center gap-3">
+          {company.website && <span>{company.website}</span>}
+          {company.website && company.phone && <span className="text-white/40">|</span>}
+          {company.phone && <span>Ph: {company.phone}</span>}
+          {company.instagram && (
+            <>
+              <span className="text-white/40">|</span>
+              <span className="flex items-center gap-1.5">
+                <InstagramSvg className="w-3.5 h-3.5" />
+                <span>{company.instagram}</span>
+              </span>
+            </>
+          )}
+          {company.facebook && (
+            <span className="flex items-center gap-1.5">
+              <FacebookSvg className="w-3.5 h-3.5" />
+              <span>{company.facebook}</span>
+            </span>
+          )}
+        </div>
+        <div className="font-bold tracking-wider">
+          {pageNum} / {totalPages}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function CompanyLogo({
+  logo,
+  name,
+  className = "h-20 max-w-[240px] w-auto object-contain mb-3",
+}: {
+  logo?: string;
+  name?: string;
+  className?: string;
+}) {
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    setLoadError(false);
+  }, [logo]);
+
+  const cleanName = (name || "Agency").replace(/^\./, "").trim();
+
+  // If no logo or if it failed to load, render a crisp agency monogram badge
+  if (!logo || loadError) {
+    const isSmall = className.includes("h-10") || className.includes("w-8") || className.includes("max-w-[120px]");
+    return (
+      <div
+        className={`${
+          isSmall
+            ? "w-9 h-9 rounded-xl text-sm"
+            : "w-16 h-16 rounded-2xl text-2xl mb-3 shadow-md border-2 border-white/80"
+        } bg-[#1e3a8a] text-white flex items-center justify-center font-black shrink-0`}
+      >
+        {cleanName.charAt(0).toUpperCase() || "A"}
+      </div>
+    );
+  }
+
+  // Resolve URL (handles relative path, /uploads/..., etc.)
+  let resolvedUrl = logo;
+  if (!resolvedUrl.startsWith("data:") && !resolvedUrl.startsWith("blob:") && !resolvedUrl.startsWith("http")) {
+    const rawApi = (import.meta.env.VITE_API_URL || "http://localhost:8000").trim();
+    const base = rawApi.replace(/\/+$/, "");
+    const clean = resolvedUrl.startsWith("/") ? resolvedUrl : `/${resolvedUrl}`;
+    resolvedUrl = `${base}${clean}`;
+  }
+
+  return (
+    <img
+      src={resolvedUrl}
+      alt={cleanName}
+      className={className}
+      onError={() => {
+        // Fallback to monogram gracefully so no broken icon is shown
+        setLoadError(true);
+      }}
+    />
+  );
+}
+
+function QuotationHeaderMini({
+  company,
+  quotationRef,
+  quotationDate,
+  validUntilDate,
+}: {
+  company: any;
+  quotationRef?: string;
+  quotationDate?: string;
+  validUntilDate?: string;
+}) {
+  return (
+    <div className="flex items-start justify-between pb-3 border-b border-slate-200">
+      <div className="flex items-start gap-3">
+        <CompanyLogo
+          logo={company.logo}
+          name={company.name}
+          className="h-10 w-auto object-contain mt-0.5 max-w-[120px]"
+        />
+
+        <div className="space-y-0.5 text-xs text-slate-500">
+          <h2 className="text-base font-black tracking-wide uppercase text-[#1e3a8a] leading-none">
+            {company.name || "TRAVEL QUOTATION"}
+          </h2>
+          {company.website && <p className="text-[11px] text-slate-500 leading-tight">{company.website}</p>}
+          {company.address && <p className="text-[11px] text-slate-500 leading-tight">{company.address}</p>}
+          {(company.phone || company.email) && (
+            <p className="text-[11px] text-slate-500 leading-tight">
+              {[company.phone, company.email].filter(Boolean).join(" | ")}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="text-right text-xs space-y-0.5 text-slate-600">
+        <p className="text-xs uppercase font-semibold tracking-wider text-slate-400">QUOTATION</p>
+        <p className="font-bold text-slate-900">
+          No: <span className="font-medium text-slate-700">{quotationRef}</span>
+        </p>
+        <p className="font-bold text-slate-900">
+          Date: <span className="font-medium text-slate-700">{quotationDate}</span>
+        </p>
+        <p className="font-bold text-slate-900">
+          Valid: <span className="font-medium text-slate-700">{validUntilDate}</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DaySectionItem({
+  day,
+  isFirst,
+}: {
+  day: DetailedItineraryDay;
+  isFirst?: boolean;
+}) {
+  const photo = day.images?.[0];
+  const locationText = day.destination
+    ? day.destination.startsWith("Location:")
+      ? day.destination
+      : `Location: ${day.destination}`
+    : "";
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <span className="px-2.5 py-0.5 rounded-full bg-[#1e3a8a] text-white font-bold text-[10px] tracking-wider uppercase">
+          DAY {day.day}
+        </span>
+        <h4 className="text-sm font-bold text-slate-900">{day.title}</h4>
+      </div>
+
+      {locationText && <p className="text-[11px] text-slate-500 font-medium">{locationText}</p>}
+
+      {day.description && (
+        <p className="text-[11px] text-slate-700 leading-relaxed font-normal whitespace-pre-line">
+          {day.description}
+        </p>
+      )}
+
+      {photo && (
         <div
-          className={`w-[66px] h-[66px] rounded-2xl flex flex-col items-center justify-center shadow-xl shrink-0 ${
-            isImage
-              ? "bg-white text-slate-900 border border-white/60"
-              : "bg-white/20 backdrop-blur-md border border-white/30 text-white"
+          className={`w-full overflow-hidden rounded-none shadow-xs mt-1.5 ${
+            isFirst ? "h-[56mm]" : "h-[50mm]"
           }`}
         >
-          <span className={`text-[9px] font-black uppercase tracking-wider ${isImage ? "text-teal-700" : "text-teal-200"}`}>
-            DAY
-          </span>
-          <span className="text-3xl font-black leading-none">{String(day).padStart(2, "0")}</span>
+          <img
+            src={photo}
+            alt={day.title}
+            className="w-full h-full object-cover"
+            crossOrigin={getSafeCrossOrigin(photo)}
+          />
         </div>
-
-        <div className="pb-0.5 space-y-0.5">
-          {destination && (
-            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-teal-500/25 backdrop-blur-md border border-teal-300/40 text-teal-100 text-[10px] font-bold">
-              <MapPin className="w-3 h-3 text-amber-300" />
-              <span>{destination}</span>
-            </div>
-          )}
-          <h2
-            className={`text-2xl font-black tracking-tight max-w-xl leading-tight ${
-              isImage ? "text-white drop-shadow-md" : "text-white drop-shadow-md"
-            }`}
-          >
-            {title || `Day ${day} Itinerary`}
-          </h2>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function ListSection({
-  title,
-  items,
-  icon,
-  accent,
-}: {
-  title: string;
-  items: string[];
-  icon: React.ReactNode;
-  accent: "emerald" | "rose";
-}) {
-  const filtered = items.filter((i) => i.trim());
-  const bg = accent === "emerald" ? "bg-emerald-50/60 border-emerald-200" : "bg-rose-50/60 border-rose-200";
+function getOrdinalSuffix(n: number) {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return s[(v - 20) % 10] || s[v] || s[0];
+}
+
+// -------------------------------------------------------------
+// Vector Badges (MOT, IATA, IATO, TAAI, ADTOI, ATOAI)
+// -------------------------------------------------------------
+
+function MotBadge() {
   return (
-    <div className={`rounded-2xl border p-4 ${bg} space-y-3 shadow-2xs`}>
-      <div className="flex items-center gap-2 border-b border-slate-200/80 pb-2">
-        {icon}
-        <h3 className="text-base font-black text-slate-900">{title}</h3>
-        <span className="ml-auto text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">
-          {filtered.length} items
-        </span>
-      </div>
-      <ul className="space-y-2">
-        {filtered.map((item, i) => (
-          <li key={i} className="flex items-start gap-2 text-xs text-slate-800 leading-snug font-medium">
-            <span
-              className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
-                accent === "emerald" ? "bg-emerald-600" : "bg-rose-600"
-              }`}
-            />
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="flex flex-col items-center justify-center text-center w-14">
+      <svg className="w-6 h-6 text-slate-700" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2L9 7h6l-3-5zm0 17l-4 3 1.5-4.5L6 14h5.5L12 9l1.5 5H19l-3.5 3.5L17 22l-5-3z" />
+      </svg>
+      <span className="text-[7.5px] font-bold text-slate-600 uppercase tracking-tighter leading-tight mt-0.5">
+        MOT REGISTERED
+      </span>
     </div>
   );
 }
 
-function PdfCell({
-  label,
-  value,
-  className,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-  highlight?: boolean;
-}) {
+function IataBadge() {
   return (
-    <div className={className}>
-      <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">{label}</p>
-      <p
-        className={`text-xs leading-snug truncate ${
-          highlight ? "font-black text-slate-900" : "font-semibold text-slate-700"
-        }`}
-      >
-        {value}
-      </p>
+    <div className="flex flex-col items-center justify-center text-center w-14">
+      <div className="flex items-center justify-center border-2 border-slate-700 rounded-full w-6 h-6">
+        <span className="text-[8px] font-black text-slate-800 tracking-tighter">IATA</span>
+      </div>
+      <span className="text-[7.5px] font-bold text-slate-600 uppercase tracking-tighter leading-tight mt-0.5">
+        ACCREDITED
+      </span>
     </div>
   );
 }
 
-function flightHasData(f: ItineraryFlight) {
-  return !!(f.flightNo.trim() || f.date || f.departure.trim() || f.arrival.trim());
-}
-
-function hotelHasData(h: ItineraryHotel) {
-  return !!(
-    h.hotelName.trim() ||
-    h.location.trim() ||
-    h.checkIn ||
-    h.checkOut ||
-    h.roomCategory.trim() ||
-    h.mealPlan.trim()
+function IatoBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center w-14">
+      <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-400 flex items-center justify-center">
+        <span className="text-[7px] font-black text-teal-800">IATO</span>
+      </div>
+      <span className="text-[7.5px] font-bold text-slate-600 uppercase tracking-tighter leading-tight mt-0.5">
+        IATO MEMBER
+      </span>
+    </div>
   );
 }
 
-function transportHasData(t: ItineraryTransport) {
-  return !!(
-    t.date ||
-    t.vehicleType.trim() ||
-    t.route.trim() ||
-    t.pickupTime.trim() ||
-    t.dropoff.trim() ||
-    t.notes.trim()
+function TaaiBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center w-14">
+      <div className="w-6 h-6 rounded-sm bg-slate-100 border border-slate-400 flex items-center justify-center">
+        <span className="text-[7px] font-black text-blue-900">TAAI</span>
+      </div>
+      <span className="text-[7.5px] font-bold text-slate-600 uppercase tracking-tighter leading-tight mt-0.5">
+        TAAI MEMBER
+      </span>
+    </div>
   );
 }
 
-function formatPdfDate(date: string) {
-  if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+function AdtoiBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center w-14">
+      <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-400 flex items-center justify-center">
+        <span className="text-[6.5px] font-black text-amber-800">ADTOI</span>
+      </div>
+      <span className="text-[7.5px] font-bold text-slate-600 uppercase tracking-tighter leading-tight mt-0.5">
+        ADTOI MEMBER
+      </span>
+    </div>
+  );
+}
+
+function AtoaiBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center w-14">
+      <div className="w-6 h-6 rounded-full bg-slate-100 border border-slate-400 flex items-center justify-center">
+        <span className="text-[6.5px] font-black text-emerald-800">ATOAI</span>
+      </div>
+      <span className="text-[7.5px] font-bold text-slate-600 uppercase tracking-tighter leading-tight mt-0.5">
+        ATOAI MEMBER
+      </span>
+    </div>
+  );
+}
+
+function UpiPaymentQr({ size = 135, upiId }: { size?: number; upiId: string }) {
+  return (
+    <div style={{ width: size, height: size }} className="relative flex items-center justify-center bg-white">
+      <svg width={size} height={size} viewBox="0 0 100 100" fill="none">
+        <rect x="5" y="5" width="26" height="26" rx="3" stroke="#0f172a" strokeWidth="4" />
+        <rect x="11" y="11" width="14" height="14" rx="2" fill="#0f172a" />
+        <rect x="69" y="5" width="26" height="26" rx="3" stroke="#0f172a" strokeWidth="4" />
+        <rect x="75" y="11" width="14" height="14" rx="2" fill="#0f172a" />
+        <rect x="5" y="69" width="26" height="26" rx="3" stroke="#0f172a" strokeWidth="4" />
+        <rect x="11" y="75" width="14" height="14" rx="2" fill="#0f172a" />
+        <path
+          d="
+          M36 6h4v4h-4z M44 6h8v4h-8z M56 6h4v4h-4z
+          M36 14h8v4h-8z M48 14h4v4h-4z M60 14h4v4h-4z
+          M36 22h4v8h-4z M44 26h12v4h-12z M60 22h4v4h-4z
+          M6 36h12v4h-12z M22 36h4v4h-4z M30 36h4v4h-4z M38 36h8v4h-8z M50 36h4v4h-4z M58 36h12v4h-12z M74 36h4v4h-4z M82 36h12v4h-12z
+          M6 44h4v8h-4z M14 48h12v4h-12z M30 44h4v4h-4z M38 48h8v4h-8z M50 44h8v4h-8z M62 48h8v4h-8z M74 44h4v8h-4z M82 48h12v4h-12z
+          M6 56h8v4h-8z M18 60h4v4h-4z M26 56h8v4h-8z M38 56h4v8h-4z M46 60h8v4h-8z M58 56h8v4h-8z M70 60h12v4h-12z M86 56h8v4h-8z
+          M36 68h4v4h-4z M44 72h8v4h-8z M56 68h8v4h-8z M68 68h4v4h-4z M76 72h18v4h-18z
+          M36 76h8v4h-8z M48 80h4v8h-4z M56 76h4v4h-4z M64 80h8v4h-8z M76 80h4v4h-4z M84 76h10v4h-10z
+          M36 84h4v4h-4z M44 88h12v4h-12z M60 84h8v8h-8z M72 88h4v4h-4z M80 84h4v8h-4z M88 88h6v4h-6z
+        "
+          fill="#0f172a"
+        />
+        <rect x="42" y="42" width="16" height="16" rx="4" fill="#0b5c53" />
+        <text x="50" y="52" fill="white" fontSize="6" fontWeight="bold" textAnchor="middle">
+          UPI
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+function PaytmBadge() {
+  return (
+    <span className="px-2 py-0.5 bg-sky-50 border border-sky-200 rounded font-bold text-[10px] text-sky-700">
+      Paytm
+    </span>
+  );
+}
+
+function GpayBadge() {
+  return (
+    <span className="px-2 py-0.5 bg-slate-100 border border-slate-300 rounded font-bold text-[10px] text-slate-800">
+      GPay
+    </span>
+  );
+}
+
+function PhonePeBadge() {
+  return (
+    <span className="px-2 py-0.5 bg-purple-50 border border-purple-200 rounded font-bold text-[10px] text-purple-700">
+      PhonePe
+    </span>
+  );
+}
+
+function InstagramSvg({ className = "w-3 h-3" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+      <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+    </svg>
+  );
+}
+
+function FacebookSvg({ className = "w-3 h-3" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M22.675 0h-21.35C.597 0 0 .597 0 1.326v21.348C0 23.403.597 24 1.326 24H12.82v-9.294H9.692v-3.622h3.128V8.413c0-3.1 1.893-4.788 4.659-4.788 1.325 0 2.463.099 2.795.143v3.24l-1.918.001c-1.504 0-1.795.715-1.795 1.763v2.313h3.587l-.467 3.622h-3.12V24h6.116c.73 0 1.325-.597 1.325-1.326V1.326C24 .597 23.405 0 22.675 0z" />
+    </svg>
+  );
+}
+
+function formatPdfDateTime(dateStr?: string, defaultTime = "14:00") {
+  if (!dateStr) return "";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const formattedDate = d.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+    const hours = String(d.getHours()).padStart(2, "0");
+    const mins = String(d.getMinutes()).padStart(2, "0");
+    const timeStr = `${hours}:${mins}` === "00:00" ? defaultTime : `${hours}:${mins}`;
+    return `${formattedDate} ${timeStr}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+function renderStarRating(ratingStr?: string) {
+  const num = parseInt(ratingStr || "3") || 3;
+  return "★".repeat(Math.min(5, Math.max(1, num))) + "☆".repeat(Math.max(0, 5 - num));
 }
 
 function getSafeCrossOrigin(url?: string): "anonymous" | undefined {

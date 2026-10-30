@@ -16,6 +16,7 @@ import { AdminUsers } from "./AdminUsers";
 import { BulkImport } from "./BulkImport";
 import { ItineraryMaker } from "./ItineraryMaker";
 import { DestinationManager } from "./DestinationManager";
+import { CompanyProfileSettings } from "./CompanyProfileSettings";
 import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -219,8 +220,8 @@ export function Dashboard() {
       title: "CATALOG & CONTENT",
       items: [
         { id: "manage" as const, label: "Manage Packages", icon: Layers, count: products.length },
+        { id: "destinations" as const, label: "Destinations", icon: MapPin },
         { id: "blogs" as const, label: "Manage Blogs", icon: FileText, count: blogs.length },
-        ...(businessType === "travel" ? [{ id: "destinations" as const, label: "Destinations", icon: MapPin }] : []),
       ]
     },
     {
@@ -271,7 +272,7 @@ export function Dashboard() {
                   </h1>
 
                   <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed max-w-xl">
-                    You have <strong className="text-slate-900 dark:text-white font-bold">{products.length} packages</strong> active in the catalog, <strong className="text-slate-900 dark:text-white font-bold">{activeInquiryCount} inquiry</strong> awaiting reply, and <strong className="text-slate-900 dark:text-white font-bold">{blogs.length} articles</strong> synced to your headless API.
+                    You have <strong className="text-slate-900 dark:text-white font-bold">{products.length} packages</strong> active in the catalog, <strong className="text-slate-900 dark:text-white font-bold">{activeInquiryCount} {activeInquiryCount === 1 ? "inquiry" : "inquiries"}</strong> awaiting reply, and <strong className="text-slate-900 dark:text-white font-bold">{blogs.length} articles</strong> synced to your headless API.
                   </p>
 
                   {/* Date Filter Pills Matching Image 2 */}
@@ -323,8 +324,16 @@ export function Dashboard() {
                   </div>
                 </div>
 
-                {/* Primary Action Button Matching Image 2 */}
-                <div className="shrink-0 self-start lg:self-center">
+                {/* Primary Action Buttons */}
+                <div className="shrink-0 self-start lg:self-center flex items-center gap-2.5">
+                  <ItineraryMaker
+                    trigger={
+                      <button className="h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold gap-2 shadow-md shadow-blue-500/25 transition-all flex items-center cursor-pointer">
+                        <FileText className="w-4 h-4" />
+                        <span>Create Quotation</span>
+                      </button>
+                    }
+                  />
                   <TravelPackageForm 
                     onSubmit={handleAdd} 
                     trigger={
@@ -364,7 +373,7 @@ export function Dashboard() {
                     <span className="text-sm leading-none">↗</span> Active in catalog
                   </div>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-                    ↑ 0% vs last week
+                    {products.length > 0 ? `${products.length} listed` : "Catalog empty"}
                   </p>
                 </div>
               </div>
@@ -393,7 +402,7 @@ export function Dashboard() {
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Published • SEO
                   </div>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-                    — 0% vs last week
+                    {blogs.length > 0 ? `${blogs.length} live posts` : "No articles yet"}
                   </p>
                 </div>
               </div>
@@ -419,10 +428,10 @@ export function Dashboard() {
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
                   <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> 1 awaiting reply
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> {activeInquiryCount > 0 ? `${activeInquiryCount} awaiting reply` : "All caught up"}
                   </div>
                   <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-                    ↑ 0% vs last week
+                    {activeInquiryCount > 0 ? "Requires action" : "No pending inquiries"}
                   </p>
                 </div>
               </div>
@@ -440,15 +449,15 @@ export function Dashboard() {
                     Catalog Value
                   </span>
                   <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums">
-                    ₹{stats.totalValue > 0 ? stats.totalValue.toLocaleString() : "153,500"}
+                    ₹{stats.totalValue.toLocaleString()}
                   </div>
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
                   <div className="text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-purple-500" /> Combined tour catalog
                   </div>
-                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-0.5">
-                    ↑ 12% vs last week
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                    {products.length > 0 ? `Across ${products.length} packages` : "No packages added"}
                   </p>
                 </div>
               </div>
@@ -466,15 +475,15 @@ export function Dashboard() {
                     Average Listing Price
                   </span>
                   <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums">
-                    ₹{stats.avgPrice > 0 ? stats.avgPrice.toLocaleString() : "25,583"}
+                    ₹{stats.avgPrice.toLocaleString()}
                   </div>
                 </div>
                 <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
                   <div className="text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-purple-500" /> Across active packages
                   </div>
-                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-0.5">
-                    ↑ 8% vs last week
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                    {products.length > 0 ? `Calculated from catalog` : "No packages added"}
                   </p>
                 </div>
               </div>
@@ -503,25 +512,23 @@ export function Dashboard() {
 
                   <div className="space-y-2">
                     {/* Item 1: Itinerary Studio */}
-                    {businessType === "travel" && (
-                      <ItineraryMaker
-                        className="w-full"
-                        trigger={
-                          <div className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all text-left cursor-pointer group">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                                <FileText className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">Itinerary Studio</p>
-                                <p className="text-[11px] text-slate-400 truncate">Create quotation PDF</p>
-                              </div>
+                    <ItineraryMaker
+                      className="w-full"
+                      trigger={
+                        <div className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all text-left cursor-pointer group">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                              <FileText className="w-4 h-4" />
                             </div>
-                            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">Itinerary Studio</p>
+                              <p className="text-[11px] text-slate-400 truncate">Create quotation PDF</p>
+                            </div>
                           </div>
-                        }
-                      />
-                    )}
+                          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                        </div>
+                      }
+                    />
 
                     {/* Item 2: Add Package */}
                     <TravelPackageForm
@@ -562,24 +569,22 @@ export function Dashboard() {
                     />
 
                     {/* Item 4: Destinations */}
-                    {businessType === "travel" && (
-                      <DestinationManager
-                        trigger={
-                          <div className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all text-left cursor-pointer group">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                                <MapPin className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">Destinations</p>
-                                <p className="text-[11px] text-slate-400 truncate">Feed itineraries</p>
-                              </div>
+                    <DestinationManager
+                      trigger={
+                        <div className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all text-left cursor-pointer group">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                              <MapPin className="w-4 h-4" />
                             </div>
-                            <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">Destinations</p>
+                              <p className="text-[11px] text-slate-400 truncate">Feed itineraries</p>
+                            </div>
                           </div>
-                        }
-                      />
-                    )}
+                          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                        </div>
+                      }
+                    />
 
                     {/* Item 5: Bulk Import via CSV */}
                     <BulkImport
@@ -642,12 +647,10 @@ export function Dashboard() {
               </div>
               <div className="shrink-0 flex items-center gap-2.5">
                 <BulkImport onImport={handleBulkImport} itemName={config.itemName} />
-                {businessType === "travel" ? (
-                  <TravelPackageForm onSubmit={handleAdd} />
-                ) : businessType === "hotel" ? (
+                {businessType === "hotel" ? (
                   <HotelForm onSubmit={handleAdd} />
                 ) : (
-                  <ProductForm onSubmit={handleAdd} />
+                  <TravelPackageForm onSubmit={handleAdd} />
                 )}
               </div>
             </div>
@@ -714,85 +717,100 @@ export function Dashboard() {
 
       case "settings":
         return (
-          <div className="bg-white dark:bg-[#0e131f] p-5 sm:p-8 rounded-2xl border border-slate-200/80 dark:border-slate-800 max-w-2xl transition-colors shadow-xs">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-6 pb-3 border-b border-slate-100 dark:border-slate-800">Settings & Account</h2>
-            <div className="space-y-6">
-              <div className="flex items-center justify-between p-3.5 bg-slate-50/80 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                <div>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100 text-xs">Account Email</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">{user?.email}</p>
-                </div>
-                <Badge variant="outline" className="text-xs bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700">
-                  Verified
-                </Badge>
-              </div>
+          <div className="space-y-8 max-w-4xl pb-12">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Agency Profile & Settings</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Configure your company branding and official bank remittance details for generated quotation PDFs.
+              </p>
+            </div>
 
-              <div className="flex items-center justify-between p-3.5 bg-slate-50/80 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                <div>
-                  <p className="font-semibold text-slate-900 dark:text-slate-100 text-xs">Business Profile Mode</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 capitalize mt-0.5">{businessType || "standard"} Mode</p>
-                </div>
-                <Badge className="bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 hover:bg-blue-50 border border-blue-200 dark:border-blue-800/60 font-medium text-xs">
-                  Active
-                </Badge>
-              </div>
+            {/* Company Branding & Bank Details for Quotation PDF */}
+            <CompanyProfileSettings />
 
-              <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-slate-400" /> Change Password
-                </h3>
-                <form onSubmit={handleUpdatePassword} className="space-y-4">
-                  <div className="space-y-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="current-pass" className="text-xs text-slate-700 dark:text-slate-300">Current Password</Label>
-                      <Input
-                        id="current-pass"
-                        type="password"
-                        className="rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
-                        value={passwords.current}
-                        onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="new-pass" className="text-xs text-slate-700 dark:text-slate-300">New Password</Label>
-                        <Input
-                          id="new-pass"
-                          type="password"
-                          className="rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
-                          value={passwords.new}
-                          onChange={(e) => setPasswords({ ...passwords, new: e.target.value })}
-                          required
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="confirm-pass" className="text-xs text-slate-700 dark:text-slate-300">Confirm New Password</Label>
-                        <Input
-                          id="confirm-pass"
-                          type="password"
-                          className="rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
-                          value={passwords.confirm}
-                          onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
-                          required
-                        />
-                      </div>
-                    </div>
+            {/* Account & Security Card */}
+            <div className="bg-white dark:bg-[#0e131f] p-5 sm:p-8 rounded-2xl border border-slate-200/80 dark:border-slate-800 transition-colors shadow-xs">
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-6 pb-3 border-b border-slate-100 dark:border-slate-800">
+                Account & Security
+              </h3>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between p-3.5 bg-slate-50/80 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100 text-xs">Account Email</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">{user?.email}</p>
                   </div>
-                  <Button type="submit" disabled={isUpdatingPass} className="mt-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white text-white text-xs">
-                    {isUpdatingPass ? "Updating..." : "Update Password"}
-                  </Button>
-                </form>
-              </div>
-
-              <div className="pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">Sign Out</p>
-                  <p className="text-[11px] text-slate-400">Log out of your current session</p>
+                  <Badge variant="outline" className="text-xs bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700">
+                    Verified
+                  </Badge>
                 </div>
-                <Button variant="outline" size="sm" className="text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/60 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl text-xs cursor-pointer" onClick={signOut}>
-                  Sign Out
-                </Button>
+
+                <div className="flex items-center justify-between p-3.5 bg-slate-50/80 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                  <div>
+                    <p className="font-semibold text-slate-900 dark:text-slate-100 text-xs">Business Profile Mode</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 capitalize mt-0.5">{businessType || "standard"} Mode</p>
+                  </div>
+                  <Badge className="bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 hover:bg-blue-50 border border-blue-200 dark:border-blue-800/60 font-medium text-xs">
+                    Active
+                  </Badge>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-slate-400" /> Change Password
+                  </h3>
+                  <form onSubmit={handleUpdatePassword} className="space-y-4">
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="current-pass" className="text-xs text-slate-700 dark:text-slate-300">Current Password</Label>
+                        <Input
+                          id="current-pass"
+                          type="password"
+                          className="rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
+                          value={passwords.current}
+                          onChange={(e) => setPasswords({ ...passwords, current: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="new-pass" className="text-xs text-slate-700 dark:text-slate-300">New Password</Label>
+                          <Input
+                            id="new-pass"
+                            type="password"
+                            className="rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
+                            value={passwords.new}
+                            onChange={(e) => setPasswords({ ...passwords, new: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="confirm-pass" className="text-xs text-slate-700 dark:text-slate-300">Confirm New Password</Label>
+                          <Input
+                            id="confirm-pass"
+                            type="password"
+                            className="rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs"
+                            value={passwords.confirm}
+                            onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
+                            required
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <Button type="submit" disabled={isUpdatingPass} className="mt-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white text-white text-xs">
+                      {isUpdatingPass ? "Updating..." : "Update Password"}
+                    </Button>
+                  </form>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">Sign Out</p>
+                    <p className="text-[11px] text-slate-400">Log out of your current session</p>
+                  </div>
+                  <Button variant="outline" size="sm" className="text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/60 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl text-xs cursor-pointer" onClick={signOut}>
+                    Sign Out
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -860,21 +878,19 @@ export function Dashboard() {
             <span>Dashboard</span>
           </button>
 
-          {businessType === "travel" && (
-            <ItineraryMaker
-              className="w-full"
-              trigger={
-                <button
-                  type="button"
-                  onClick={() => setSidebarOpen(false)}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 border border-dashed border-slate-700/60 text-xs font-medium transition-all cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Create Itinerary</span>
-                </button>
-              }
-            />
-          )}
+          <ItineraryMaker
+            className="w-full"
+            trigger={
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(false)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-slate-200 hover:text-white hover:bg-white/10 border border-slate-700/80 bg-slate-900/60 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5 text-blue-400" />
+                <span>Create Quotation</span>
+              </button>
+            }
+          />
         </div>
 
         {/* Categorized Navigation */}

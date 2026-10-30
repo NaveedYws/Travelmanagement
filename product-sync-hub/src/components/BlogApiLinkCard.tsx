@@ -8,7 +8,8 @@ export function BlogApiLinkCard() {
   const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
-  const apiUrlBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const rawBase = (import.meta.env.VITE_API_URL || "http://localhost:8000").trim();
+  const apiUrlBase = (rawBase.startsWith("http://") || rawBase.startsWith("https://") ? rawBase : `https://${rawBase}`).replace(/\/+$/, "");
   const apiUrl = user ? `${apiUrlBase}/api/public/blogs.php?user_id=${user.id}` : "";
 
   const copyToClipboard = () => {

@@ -7,7 +7,14 @@ export interface User {
   company_name?: string;
   company_logo?: string;
   company_phone?: string;
+  company_email?: string;
+  company_address?: string;
   company_website?: string;
+  bank_name?: string;
+  bank_account_name?: string;
+  bank_account_no?: string;
+  bank_ifsc?: string;
+  bank_upi_id?: string;
   created_at?: string;
 }
 

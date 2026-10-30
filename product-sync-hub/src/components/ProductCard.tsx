@@ -88,17 +88,7 @@ export function ProductCard({ product, onUpdate, onDelete }: ProductCardProps) {
                 </Button>
               }
             />
-            {businessType === "travel" ? (
-              <TravelPackageForm
-                initialData={product}
-                onSubmit={(data) => onUpdate({ id: product.id, ...data })}
-                trigger={
-                  <Button variant="outline" size="sm" className="flex-1 rounded-xl border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 font-medium">
-                    <Pencil className="w-3 h-3 mr-2" /> Edit
-                  </Button>
-                }
-              />
-            ) : businessType === "hotel" ? (
+            {businessType === "hotel" ? (
               <HotelForm
                 initialData={product}
                 onSubmit={(data) => onUpdate({ id: product.id, ...data })}
@@ -109,7 +99,7 @@ export function ProductCard({ product, onUpdate, onDelete }: ProductCardProps) {
                 }
               />
             ) : (
-              <ProductForm
+              <TravelPackageForm
                 initialData={product}
                 onSubmit={(data) => onUpdate({ id: product.id, ...data })}
                 trigger={
