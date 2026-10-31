@@ -193,6 +193,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   // 4. Hotels (Blank clean start)
   const [hotels, setHotels] = useState<ItineraryHotel[]>([]);
   const [editingHotelIndex, setEditingHotelIndex] = useState<number | null>(null);
+  const [isUploadingHotelImage, setIsUploadingHotelImage] = useState(false);
   const [hotelForm, setHotelForm] = useState<ItineraryHotel>({
     hotelName: "",
     location: "",
@@ -206,6 +207,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     ratePerNight: 0,
     price: 0,
     amenities: "",
+    imageUrl: "",
   });
 
   // 5. Transports (Blank clean start)
@@ -562,6 +564,23 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     }
   };
 
+  const handleHotelFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingHotelImage(true);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setHotelForm((prev) => ({ ...prev, imageUrl: dataUrl }));
+      toast.success("Hotel photo loaded");
+    } catch (err) {
+      console.error("Error reading hotel image:", err);
+      toast.error("Failed to process hotel image file");
+    } finally {
+      setIsUploadingHotelImage(false);
+      e.target.value = "";
+    }
+  };
+
   // Hotel calculation helpers & handlers
   const calculateHotelNights = (inDate?: string, outDate?: string): number => {
     if (!inDate || !outDate) return 1;
@@ -680,6 +699,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       ratePerNight: 0,
       price: 0,
       amenities: "",
+      imageUrl: "",
     });
   };
 
@@ -695,6 +715,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       rooms: r,
       ratePerNight: rate,
       price: h.price || (rate * n * r),
+      imageUrl: h.imageUrl || "",
     });
     setSectionsOpen((p) => ({ ...p, hotels: true }));
   };
@@ -2055,6 +2076,53 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       />
                     </div>
 
+                    {/* Hotel Image Upload Box */}
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] font-bold text-slate-600">Hotel Image / Photo (Optional)</Label>
+                      <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 bg-white text-center flex flex-col items-center justify-center gap-2 hover:border-teal-400 transition-colors">
+                        {hotelForm.imageUrl ? (
+                          <div className="relative w-full max-w-xs h-32 rounded-lg overflow-hidden border border-slate-200 group">
+                            <img src={hotelForm.imageUrl} alt="Hotel preview" className="w-full h-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => setHotelForm((prev) => ({ ...prev, imageUrl: "" }))}
+                              className="absolute top-2 right-2 bg-slate-900/75 hover:bg-slate-900 text-white p-1 rounded-full text-xs opacity-90 transition-opacity"
+                              title="Remove photo"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
+                              <Upload className="w-5 h-5" />
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              <label className="font-semibold text-teal-700 hover:text-teal-800 cursor-pointer">
+                                <span>Browse or drop hotel image</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={handleHotelFileUpload}
+                                  disabled={isUploadingHotelImage}
+                                />
+                              </label>
+                              <span className="block text-[10px] text-slate-400 mt-0.5">PNG, JPG, WebP up to 5MB</span>
+                            </div>
+                            <div className="w-full max-w-sm flex items-center gap-2 mt-1">
+                              <Input
+                                placeholder="Or paste image URL (https://...)"
+                                value={hotelForm.imageUrl || ""}
+                                onChange={(e) => setHotelForm((prev) => ({ ...prev, imageUrl: e.target.value }))}
+                                className="h-8 text-xs bg-slate-50 border-slate-200"
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Teal button matching screenshot */}
                     <Button
                       type="button"
@@ -2082,26 +2150,35 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                             key={idx}
                             className="p-3.5 sm:p-4 rounded-xl border border-slate-200 bg-white hover:border-teal-200 transition-all shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                           >
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-slate-900">{h.hotelName}</span>
-                                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-100">
-                                  {h.starRating || "Hotel"}
-                                </span>
-                              </div>
-                              <p className="text-xs text-slate-500">{h.location}</p>
-                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 pt-1">
-                                <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">
-                                  {h.checkIn || "—"} to {h.checkOut || "—"} ({h.nights || 1} Nights)
-                                </span>
-                                <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.rooms || 1} Room(s)</span>
-                                {h.ratePerNight ? (
-                                  <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-100">
-                                    ₹{h.ratePerNight.toLocaleString("en-IN")}/day
+                            <div className="flex items-start gap-3 flex-1 min-w-0">
+                              {h.imageUrl ? (
+                                <img
+                                  src={h.imageUrl}
+                                  alt={h.hotelName}
+                                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-lg object-cover border border-slate-200 shrink-0"
+                                />
+                              ) : null}
+                              <div className="space-y-1 min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-bold text-slate-900 truncate">{h.hotelName}</span>
+                                  <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-100 shrink-0">
+                                    {h.starRating || "Hotel"}
                                   </span>
-                                ) : null}
-                                <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.roomCategory}</span>
-                                <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.mealPlan}</span>
+                                </div>
+                                <p className="text-xs text-slate-500">{h.location}</p>
+                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 pt-1">
+                                  <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">
+                                    {h.checkIn || "—"} to {h.checkOut || "—"} ({h.nights || 1} Nights)
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.rooms || 1} Room(s)</span>
+                                  {h.ratePerNight ? (
+                                    <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-100">
+                                      ₹{h.ratePerNight.toLocaleString("en-IN")}/day
+                                    </span>
+                                  ) : null}
+                                  <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.roomCategory}</span>
+                                  <span className="px-2 py-0.5 rounded bg-slate-100 font-medium">{h.mealPlan}</span>
+                                </div>
                               </div>
                             </div>
 

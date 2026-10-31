@@ -53,6 +53,7 @@ export interface ItineraryHotel {
   ratePerNight?: number;
   starRating?: string;
   amenities?: string;
+  imageUrl?: string;
 }
 
 export interface ItineraryTransport {

@@ -400,7 +400,7 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
                 {activeHotels.map((hotel, hIdx) => {
                   const nightLabels = [`${hIdx + 1}${getOrdinalSuffix(hIdx + 1)}`];
                   const hotelPhoto =
-                    hotel.amenities?.startsWith("http") ? hotel.amenities : null;
+                    hotel.imageUrl || (hotel.amenities?.startsWith("http") ? hotel.amenities : null);
 
                   return (
                     <div
