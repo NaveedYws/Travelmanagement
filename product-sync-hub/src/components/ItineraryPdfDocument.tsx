@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Lock, Sparkles, Check, X } from "lucide-react";
 import {
   DetailedItineraryDay,
   ItineraryFlight,
@@ -80,6 +81,108 @@ export function getCompanyProfile(user?: User | null) {
   };
 }
 
+// Default Cancellation Policy
+const DEFAULT_CANCELLATION_POLICY = [
+  {
+    period: "30+ Days Prior",
+    refund: "90% Refund",
+    detail: "Nominal administrative processing fee deducted",
+  },
+  {
+    period: "15 to 29 Days",
+    refund: "50% Refund",
+    detail: "Retention of non-refundable hotel & transport commitments",
+  },
+  {
+    period: "Less than 15 Days",
+    refund: "Non-Refundable",
+    detail: "100% cancellation fee as per partner policies & peak dates",
+  },
+];
+
+// Parse Day Itinerary into structured point-wise bullet items
+function parseDayPoints(description?: string, activities?: string): string[] {
+  const points: string[] = [];
+
+  // Parse activities if present and distinct
+  if (activities && activities.trim()) {
+    const actLines = activities.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
+    for (const line of actLines) {
+      const clean = line.replace(/^([•\-\*–—\u2022\u2023\u25E6\u2043\u2219]+|\d+[\.\)\-:]+)\s*/, "").trim();
+      if (clean && !points.includes(clean)) {
+        points.push(clean);
+      }
+    }
+  }
+
+  // Parse description
+  if (description && description.trim()) {
+    const descLines = description.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
+    for (const line of descLines) {
+      const clean = line.replace(/^([•\-\*–—\u2022\u2023\u25E6\u2043\u2219]+|\d+[\.\)\-:]+)\s*/, "").trim();
+      if (clean && !points.includes(clean)) {
+        points.push(clean);
+      }
+    }
+  }
+
+  // If only 1 long line without newlines, split on sentence boundaries
+  if (points.length === 1 && points[0].length > 100 && points[0].includes(". ")) {
+    const sentences = points[0]
+      .split(/(?<=\.)\s+(?=[A-Z0-9])/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (sentences.length > 1) {
+      return sentences;
+    }
+  }
+
+  return points.length > 0
+    ? points
+    : ["Scheduled sightseeing, transfers, and leisure activities as per tour program."];
+}
+
+// Smart chunking for days to avoid lonely 1-day pages and massive empty spaces
+function chunkDays(days: DetailedItineraryDay[]): {
+  firstPageDays: DetailedItineraryDay[];
+  otherPages: DetailedItineraryDay[][];
+} {
+  const n = days.length;
+  if (n === 0) {
+    return { firstPageDays: [], otherPages: [] };
+  }
+  // Up to 4 days: all fit comfortably on Page 2 alongside executive summary & pricing!
+  // This ensures 1, 2, 3, or 4-day itineraries flow continuously without massive whitespace voids
+  if (n <= 4) {
+    return { firstPageDays: days, otherPages: [] };
+  }
+
+  // 5 or more days:
+  // First 3 days on Page 2 alongside executive summary
+  const firstPageDays = days.slice(0, 3);
+  const rest = days.slice(3);
+  const otherPages: DetailedItineraryDay[][] = [];
+
+  // Subsequent pages fit 3 to 4 days comfortably without empty space
+  let i = 0;
+  while (i < rest.length) {
+    const remaining = rest.length - i;
+    if (remaining <= 4) {
+      otherPages.push(rest.slice(i));
+      break;
+    } else if (remaining === 5) {
+      // Split 5 into 3 and 2 so neither page has an orphaned single day
+      otherPages.push(rest.slice(i, i + 3));
+      i += 3;
+    } else {
+      otherPages.push(rest.slice(i, i + 4));
+      i += 4;
+    }
+  }
+
+  return { firstPageDays, otherPages };
+}
+
 export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) {
   const [profileSync, setProfileSync] = useState(0);
 
@@ -127,13 +230,15 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
     heroImage = "",
   } = data;
 
-  // Filter actual items added by user
+  // Filter user data
   const activeDays = days.filter((d) => (d.title || d.description || "").trim());
   const activeHotels = hotels.filter((h) => (h.hotelName || "").trim());
   const activeTransports = transports.filter((t) => (t.vehicleType || t.route || t.notes || "").trim());
   const activeActivities = (sightseeings || []).filter((s) => (s.title || "").trim());
-  const activeInclusions = (inclusions || []).filter((i) => i.trim());
-  const activeExclusions = (exclusions || []).filter((e) => e.trim());
+
+  // User inclusions/exclusions (custom items added by user)
+  const effectiveInclusions = (inclusions || []).filter((i) => i && i.trim());
+  const effectiveExclusions = (exclusions || []).filter((e) => e && e.trim());
 
   const numAdults = parseInt(adults) || 1;
   const numChildren = parseInt(children) || 0;
@@ -144,30 +249,27 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
   const numFinalPrice = parseFloat(finalRate || "0");
   const formattedPrice = numFinalPrice > 0 ? numFinalPrice.toLocaleString("en-IN") : "0";
 
-  // Days pagination: Day 1 is on Page 2 with Quotation summary.
-  // Remaining days are grouped 2 per page.
-  const remainingDays = activeDays.slice(1);
-  const dayPairs: DetailedItineraryDay[][] = [];
-  for (let i = 0; i < remainingDays.length; i += 2) {
-    dayPairs.push(remainingDays.slice(i, i + 2));
-  }
+  // Chunk days intelligently
+  const { firstPageDays, otherPages: dayPages } = chunkDays(activeDays);
 
-  // Determine which extra sections have data
-  const hasAccommodationOrServices =
-    activeHotels.length > 0 || activeTransports.length > 0 || activeActivities.length > 0 || activeInclusions.length > 0;
+  const hasAccommodationsOrFleet =
+    activeHotels.length > 0 || activeTransports.length > 0 || activeActivities.length > 0;
 
-  const hasPaymentDetails =
-    Boolean(company.accountNumber || company.upiId || company.accountHolder || company.ifsc);
+  const hasPaymentDetails = Boolean(
+    company.accountNumber || company.upiId || company.accountHolder || company.ifsc
+  );
 
-  const hasGuestPhotos = guestPhotos.length > 0 || (heroImage && !heroImage.includes("placeholder"));
+  // ONLY show guest picture page if user actually provided guest photos
+  const hasActualGuestPhotos = Boolean(guestPhotos && guestPhotos.length > 0);
 
-  // Calculate dynamic total pages
+  // Total pages calculation
   let totalPages = 1; // Page 1: Cover
-  totalPages += 1; // Page 2: Summary + Day 1
-  totalPages += dayPairs.length; // Remaining day pages
-  if (hasAccommodationOrServices) totalPages += 1; // Page: Accommodations & Services
-  if (hasPaymentDetails) totalPages += 1; // Page: Payment & Bank
-  if (hasGuestPhotos) totalPages += 1; // Page: Guest Pictures
+  totalPages += 1; // Page 2: Summary + first day(s)
+  totalPages += dayPages.length; // Remaining day pages
+  if (hasAccommodationsOrFleet) totalPages += 1; // Accommodations & Transport
+  totalPages += 1; // Inclusions, Exclusions, Cancellation & Privacy Policy (Always guaranteed)
+  if (hasPaymentDetails) totalPages += 1; // Payment & Bank info
+  if (hasActualGuestPhotos) totalPages += 1; // Actual guest pictures
 
   let currentPage = 1;
 
@@ -176,13 +278,22 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
     activeDays.find((d) => d.images && d.images[0]?.trim())?.images?.[0] ||
     "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600";
 
+  // Dynamic customer display name (properly capitalized, e.g. "deepak" -> "Deepak", "aarif" -> "Aarif")
+  const rawClientName = (clientName || "Valued Traveler").trim();
+  const customerDisplayName = rawClientName
+    ? rawClientName
+        .split(/\s+/)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ")
+    : "Valued Traveler";
+
   return (
     <div className="font-sans text-slate-800 antialiased selection:bg-teal-500 selection:text-white bg-slate-100 flex flex-col items-center">
       {/* ========================================================================= */}
-      {/* PAGE 1: COVER PAGE (With Scenic Background Image & Profile Branding)       */}
+      {/* PAGE 1: COVER PAGE (With Highly Visible Scenery & Welcome Briefing)       */}
       {/* ========================================================================= */}
       <div data-pdf-page className={PAGE}>
-        {/* Scenic Travel Background Image Layer */}
+        {/* Scenic Travel Background Image Layer (Original Luminous Style Restored) */}
         <div className="absolute inset-0 z-0 overflow-hidden">
           <img
             src={coverBg}
@@ -208,7 +319,7 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
             </h1>
           </div>
 
-          {/* Quotation Info & Client Name Showcase Card */}
+          {/* Quotation Info & Client Name Showcase Card with Dynamic Customer Name & Welcome Briefing */}
           <div className="my-auto py-5 relative z-10 max-w-lg mx-auto w-full">
             <div className="bg-white/85 backdrop-blur-md rounded-3xl p-6 sm:p-8 border border-white/90 shadow-xl text-center space-y-2">
               <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
@@ -218,13 +329,30 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
                 No: {quotationRef} &nbsp;|&nbsp; Date: {quotationDate} &nbsp;|&nbsp; Valid: {validUntilDate}
               </p>
 
-              <div className="pt-6 border-t border-slate-200/70 mt-4">
+              <div className="pt-5 border-t border-slate-200/70 mt-3 space-y-1">
                 <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">
-                  PREPARED FOR
+                  PREPARED EXCLUSIVELY FOR
                 </p>
-                <h2 className="text-3xl font-black text-[#0f2942] tracking-tight mt-1">
-                  {clientName}
+                <h2 className="text-3xl font-black text-[#0f2942] tracking-tight mt-0.5">
+                  {customerDisplayName}
                 </h2>
+                {tripTitle && (
+                  <p className="text-sm font-semibold text-teal-700 mt-1">
+                    {tripTitle}
+                  </p>
+                )}
+                {destination && (
+                  <p className="text-xs text-slate-500 font-medium">
+                    {destination} · {duration}
+                  </p>
+                )}
+              </div>
+
+              {/* Welcome Briefing with Dynamic Customer Name */}
+              <div className="pt-3 border-t border-slate-200/70 mt-2 text-xs text-slate-600 leading-relaxed text-center">
+                <p>
+                  Dear <strong className="text-slate-800 font-bold">{customerDisplayName}</strong>, welcome to your bespoke travel proposal! We are delighted to present this customized holiday itinerary crafted exclusively for your upcoming journey.
+                </p>
               </div>
             </div>
           </div>
@@ -258,10 +386,10 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
       </div>
 
       {/* ========================================================================= */}
-      {/* PAGE 2: TOTAL PRICE, CLIENT DETAILS & DAY 1                               */}
+      {/* PAGE 2: EXECUTIVE SUMMARY, INVESTMENT BREAKDOWN & ITINERARY START         */}
       {/* ========================================================================= */}
       <div data-pdf-page className={PAGE}>
-        <div className="p-10 pb-20 space-y-4">
+        <div className="p-6 pb-12 space-y-2.5">
           <QuotationHeaderMini
             company={company}
             quotationRef={quotationRef}
@@ -269,85 +397,118 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
             validUntilDate={validUntilDate}
           />
 
-          {/* TOTAL QUOTATION PRICE CARD (Showing Exact Pricing) */}
-          <div className="bg-[#f4f7fb] border border-slate-200/80 rounded-xl p-4 space-y-2">
+          {/* Section Banner */}
+          <div className="flex items-center justify-between border-b border-slate-200 pb-1">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-              TOTAL QUOTATION PRICE
+              EXECUTIVE TRIP SUMMARY &amp; INVESTMENT
             </h3>
-            <div className="space-y-1 text-xs">
-              {discountAmount > 0 && (
-                <div className="flex justify-between items-center text-slate-700 font-medium">
-                  <span>Discount ({discountPercent}%)</span>
-                  <span className="font-semibold text-slate-900">
-                    -Rs. {discountAmount.toLocaleString("en-IN")}
-                  </span>
-                </div>
-              )}
-              {gstAmount > 0 && (
-                <div className="flex justify-between items-center text-slate-700 font-medium">
-                  <span>GST ({gstRate}%)</span>
-                  <span className="font-semibold text-slate-900">
-                    Rs. {gstAmount.toLocaleString("en-IN")}
-                  </span>
-                </div>
-              )}
-            </div>
+            <span className="text-[10px] text-slate-400 font-medium">All Prices in INR (₹)</span>
+          </div>
 
-            <div className="pt-2 border-t border-slate-200 flex justify-between items-end">
+          {/* Top 2-Column: Price Card + Package Details */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* TOTAL QUOTATION PRICE CARD */}
+            <div className="bg-[#f4f7fb] border border-blue-200/80 rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
               <div>
-                <p className="text-xs font-bold text-slate-900 leading-tight">Amount payable</p>
-                <p className="text-[10px] text-slate-400">
-                  {gstAmount > 0 ? `Including GST (${gstRate}%)` : "All inclusive package price"}
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#1e3a8a]">
+                  TOTAL QUOTATION INVESTMENT
                 </p>
+                <div className="space-y-0.5 text-xs pt-0.5">
+                  {discountAmount > 0 && (
+                    <div className="flex justify-between items-center text-slate-700">
+                      <span>Discount ({discountPercent}%)</span>
+                      <span className="font-semibold text-emerald-700">
+                        -₹{discountAmount.toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  )}
+                  {gstAmount > 0 && (
+                    <div className="flex justify-between items-center text-slate-700">
+                      <span>GST ({gstRate}%)</span>
+                      <span className="font-semibold text-slate-800">
+                        ₹{gstAmount.toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <p className="text-2xl font-black text-[#1e3a8a] tracking-tight leading-none">
-                Rs. {formattedPrice}
-              </p>
-            </div>
-          </div>
 
-          {/* 2-Column: PREPARED FOR & PACKAGE DETAILS */}
-          <div className="grid grid-cols-2 gap-6 pt-1 text-xs">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                PREPARED FOR
-              </p>
-              <p className="font-bold text-slate-900 text-sm">{clientName}</p>
-              {clientPhone && <p className="text-slate-600 mt-0.5">Ph: {clientPhone}</p>}
-              {clientEmail && <p className="text-slate-500 text-[11px] mt-0.5">{clientEmail}</p>}
-            </div>
-
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                PACKAGE DETAILS
-              </p>
-              <div className="space-y-0.5 text-slate-800">
-                <p>
-                  <strong className="text-slate-600 font-medium">Package:</strong>{" "}
-                  <span className="font-bold">
-                    {tripTitle || (destination ? `${destination} Tour Package` : "Confirmed Travel Package")}
-                  </span>
-                </p>
-                <p>
-                  <strong className="text-slate-600 font-medium">Duration:</strong>{" "}
-                  <span className="font-bold">{duration}</span>
-                </p>
-                <p>
-                  <strong className="text-slate-600 font-medium">Guests:</strong>{" "}
-                  <span className="font-bold">{guestCount}</span>
+              <div className="pt-1.5 border-t border-slate-200 flex justify-between items-end">
+                <div>
+                  <p className="text-xs font-bold text-slate-900 leading-tight">Amount Payable</p>
+                  <p className="text-[9.5px] text-slate-400">
+                    {gstAmount > 0 ? `Inclusive of ${gstRate}% GST` : "All-inclusive quotation rate"}
+                  </p>
+                </div>
+                <p className="text-2xl font-black text-[#1e3a8a] tracking-tight leading-none">
+                  ₹{formattedPrice}
                 </p>
               </div>
             </div>
+
+            {/* PREPARED FOR & PACKAGE DETAILS */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
+                  TRAVELER &amp; PACKAGE SPECIFICATIONS
+                </p>
+                <div className="space-y-0.5 text-xs">
+                  <p className="flex justify-between">
+                    <span className="text-slate-500 font-medium">Guest Name:</span>
+                    <strong className="text-slate-900">{customerDisplayName}</strong>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-slate-500 font-medium">Package:</span>
+                    <span className="font-bold text-slate-800 truncate max-w-[130px]">
+                      {tripTitle || (destination ? `${destination} Tour` : "Confirmed Package")}
+                    </span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-slate-500 font-medium">Duration:</span>
+                    <span className="font-bold text-slate-800">{duration}</span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-slate-500 font-medium">Travelers:</span>
+                    <span className="font-bold text-slate-800">{guestCount}</span>
+                  </p>
+                </div>
+              </div>
+              {destination && (
+                <div className="pt-0.5 border-t border-slate-200/80 text-[10px] text-slate-500">
+                  <span>Destination: </span>
+                  <strong className="text-teal-800">{destination}</strong>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* DAY-WISE ITINERARY (Day 1) */}
-          <div className="pt-2">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a] mb-3">
-              DAY-WISE ITINERARY
-            </h3>
+          {/* DAY-WISE ITINERARY (Timeline matching screenshot with small image in side) */}
+          <div className="pt-0.5 space-y-1.5">
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-1 mb-2">
+              <div className="w-4 h-4 text-sky-600 shrink-0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+              </div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a] leading-none">
+                DETAILED DAY-WISE TOUR ITINERARY
+              </h3>
+            </div>
 
-            {activeDays.length > 0 ? (
-              <DaySectionItem day={activeDays[0]} isFirst />
+            {firstPageDays.length > 0 ? (
+              <div className="relative pl-7 space-y-2.5 before:absolute before:left-[11px] before:top-3.5 before:bottom-3.5 before:w-[2px] before:bg-sky-200">
+                {firstPageDays.map((day) => (
+                  <DayTimelineItem
+                    key={day.day}
+                    day={day}
+                    totalDays={activeDays.length}
+                    hotelMealPlan={activeHotels[0]?.mealPlan}
+                  />
+                ))}
+              </div>
             ) : (
               <div className="p-4 rounded-xl border border-dashed border-slate-300 text-center text-slate-500 text-xs">
                 Detailed day-wise schedule will be added to this quotation proposal.
@@ -360,154 +521,202 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
       </div>
 
       {/* ========================================================================= */}
-      {/* PAGES 3..N: REMAINING DAYS (2 DAYS PER PAGE - EXACT USER DAYS)             */}
+      {/* PAGES 3..N: REMAINING DAYS (TIMELINE WITH SMALL IMAGE IN SIDE)            */}
       {/* ========================================================================= */}
-      {dayPairs.map((pair, pIdx) => {
-        const isLastDayPage = pIdx === dayPairs.length - 1;
-        return (
-          <div key={pIdx} data-pdf-page className={PAGE}>
-            <div className="p-10 pb-20 space-y-6">
-              {pair.map((day) => (
-                <DaySectionItem key={day.day} day={day} />
-              ))}
+      {dayPages.map((pageDays, pIdx) => (
+        <div key={pIdx} data-pdf-page className={PAGE}>
+          <div className="p-6 pb-12 space-y-2.5">
+            <QuotationHeaderMini
+              company={company}
+              quotationRef={quotationRef}
+              quotationDate={quotationDate}
+              validUntilDate={validUntilDate}
+            />
 
-              {isLastDayPage && hasAccommodationOrServices && (
-                <div className="pt-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                    ACCOMMODATION &amp; SERVICES
-                  </h3>
-                </div>
-              )}
+            <div className="flex items-center gap-2 border-b border-slate-200 pb-1 mb-2">
+              <div className="w-4 h-4 text-sky-600 shrink-0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+              </div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a] leading-none">
+                DETAILED DAY-WISE TOUR ITINERARY (CONTINUED)
+              </h3>
             </div>
 
-            <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
+            <div className="relative pl-7 space-y-2.5 before:absolute before:left-[11px] before:top-3.5 before:bottom-3.5 before:w-[2px] before:bg-sky-200">
+              {pageDays.map((day) => (
+                <DayTimelineItem
+                  key={day.day}
+                  day={day}
+                  totalDays={activeDays.length}
+                  hotelMealPlan={activeHotels[0]?.mealPlan}
+                />
+              ))}
+            </div>
           </div>
-        );
-      })}
+
+          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
+        </div>
+      ))}
 
       {/* ========================================================================= */}
-      {/* PAGE: ACCOMMODATIONS, TRANSPORT & ACTIVITIES                              */}
+      {/* PAGE: CONFIRMED ACCOMMODATIONS & TRANSPORT FLEET                          */}
       {/* ========================================================================= */}
-      {hasAccommodationOrServices && (
+      {hasAccommodationsOrFleet && (
         <div data-pdf-page className={PAGE}>
-          <div className="p-10 pb-20 space-y-5">
-            {/* Hotels List (Only Rendered if User Added Hotels) */}
+          <div className="p-6 pb-12 space-y-3">
+            <QuotationHeaderMini
+              company={company}
+              quotationRef={quotationRef}
+              quotationDate={quotationDate}
+              validUntilDate={validUntilDate}
+            />
+
+            {/* HOTELS & STAYS SECTION */}
             {activeHotels.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                  ACCOMMODATION
-                </h3>
-                {activeHotels.map((hotel, hIdx) => {
-                  const nightLabels = [`${hIdx + 1}${getOrdinalSuffix(hIdx + 1)}`];
-                  const hotelPhoto =
-                    hotel.imageUrl || (hotel.amenities?.startsWith("http") ? hotel.amenities : null);
+              <div className="space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                    CONFIRMED ACCOMMODATION &amp; STAYS
+                  </h3>
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    {activeHotels.length} Hotel{activeHotels.length > 1 ? "s" : ""} Selected
+                  </span>
+                </div>
 
-                  return (
-                    <div
-                      key={hIdx}
-                      className="space-y-2 pb-3 border-b border-slate-150 last:border-0 last:pb-0"
-                    >
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                        {nightLabels.map((nl) => (
-                          <span
-                            key={nl}
-                            className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-semibold"
-                          >
-                            {nl}
-                          </span>
-                        ))}
-                        <span className="font-bold text-slate-900 ml-1">
-                          Nights at {hotel.location || "Confirmed City"}
-                        </span>
-                      </div>
+                <div className="space-y-2.5">
+                  {activeHotels.map((hotel, hIdx) => {
+                    const nightLabels = [`${hIdx + 1}${getOrdinalSuffix(hIdx + 1)}`];
+                    const hotelPhoto =
+                      hotel.imageUrl ||
+                      (hotel.amenities?.startsWith("http") ? hotel.amenities : null);
 
-                      {(hotel.checkIn || hotel.checkOut) && (
-                        <p className="text-[11px] text-slate-500 font-medium">
-                          Check-in: {formatPdfDateTime(hotel.checkIn, "14:00")} &nbsp;|&nbsp; Check-out:{" "}
-                          {formatPdfDateTime(hotel.checkOut, "11:00")}
-                        </p>
-                      )}
+                    return (
+                      <div
+                        key={hIdx}
+                        className="bg-white rounded-xl border border-slate-200/90 p-3.5 shadow-2xs space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
+                          <div className="flex items-center gap-1.5">
+                            {nightLabels.map((nl) => (
+                              <span
+                                key={nl}
+                                className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 text-[10px] font-bold border border-teal-100"
+                              >
+                                {nl} Night
+                              </span>
+                            ))}
+                            <span className="font-bold text-slate-900 text-xs ml-1">
+                              Stay at {hotel.location || "Confirmed Destination"}
+                            </span>
+                          </div>
 
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-2 flex-1">
-                          <div>
-                            <h4 className="text-sm font-bold text-slate-900">{hotel.hotelName}</h4>
-                            {hotel.starRating && (
-                              <p className="text-xs text-amber-500 font-bold tracking-widest mt-0.5">
-                                {renderStarRating(hotel.starRating)}
+                          {(hotel.checkIn || hotel.checkOut) && (
+                            <p className="text-[10px] text-slate-500 font-medium">
+                              In: {formatPdfDateTime(hotel.checkIn, "14:00")} · Out:{" "}
+                              {formatPdfDateTime(hotel.checkOut, "11:00")}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-2 flex-1 min-w-0">
+                            <div>
+                              <h4 className="text-sm font-bold text-slate-900 leading-snug">
+                                {hotel.hotelName}
+                              </h4>
+                              {hotel.starRating && (
+                                <p className="text-xs text-amber-500 font-bold tracking-widest mt-0.5">
+                                  {renderStarRating(hotel.starRating)}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                              <div>
+                                <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
+                                  ROOM DETAILS
+                                </p>
+                                <p className="font-semibold text-slate-900 text-[11px]">
+                                  {hotel.rooms || 1} {hotel.roomCategory || "Deluxe Room"}
+                                </p>
+                                <p className="text-[10px] text-slate-500">
+                                  {hotel.rooms || 1} Room(s) · {hotel.nights || 1} Night(s)
+                                </p>
+                              </div>
+
+                              <div>
+                                <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
+                                  MEAL PLAN
+                                </p>
+                                <p className="font-bold text-teal-800 uppercase text-[11px]">
+                                  {hotel.mealPlan || "CP (Breakfast Included)"}
+                                </p>
+                              </div>
+                            </div>
+
+                            {hotel.amenities && !hotel.amenities.startsWith("http") && (
+                              <p className="text-[10px] text-slate-500 pt-0.5 border-t border-slate-100">
+                                <span className="font-semibold text-slate-600">Inclusions: </span>
+                                {hotel.amenities}
                               </p>
                             )}
                           </div>
 
-                          <div className="grid grid-cols-2 gap-4 text-xs pt-1">
-                            <div>
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                ROOMS
-                              </p>
-                              <p className="font-semibold text-slate-900">
-                                {hotel.rooms || 1} {hotel.roomCategory || "standard"}
-                              </p>
-                              <p className="text-[11px] text-slate-600">
-                                {hotel.rooms || 1} Room(s) · {hotel.nights || 1} Night(s)
-                              </p>
+                          {hotelPhoto && (
+                            <div className="w-[50mm] h-[32mm] shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-2xs">
+                              <img
+                                src={hotelPhoto}
+                                alt={hotel.hotelName}
+                                className="w-full h-full object-cover"
+                                crossOrigin={getSafeCrossOrigin(hotelPhoto)}
+                              />
                             </div>
-
-                            <div>
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                MEAL PLAN
-                              </p>
-                              <p className="font-bold text-slate-900 uppercase">
-                                {hotel.mealPlan || "Room Only"}
-                              </p>
-                            </div>
-                          </div>
+                          )}
                         </div>
-
-                        {hotelPhoto && (
-                          <div className="w-44 h-28 shrink-0 overflow-hidden rounded-sm border border-slate-200">
-                            <img
-                              src={hotelPhoto}
-                              alt={hotel.hotelName}
-                              className="w-full h-full object-cover"
-                              crossOrigin={getSafeCrossOrigin(hotelPhoto)}
-                            />
-                          </div>
-                        )}
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            {/* TRANSPORT Table (Only Rendered if User Added Transport) */}
+            {/* TRANSPORTATION SECTION */}
             {activeTransports.length > 0 && (
               <div className="space-y-2 pt-1">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                  TRANSPORT
-                </h3>
-                <div className="border border-slate-200 rounded-sm overflow-hidden text-xs">
-                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[11px]">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                    TRANSPORTATION &amp; FLEET SPECIFICATIONS
+                  </h3>
+                  <span className="text-[10px] text-slate-400 font-medium">Dedicated Vehicle</span>
+                </div>
+
+                <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
+                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10.5px]">
                     <div className="w-8">#</div>
-                    <div className="w-32">Vehicle Type</div>
-                    <div className="flex-1">Vehicle Info / Notes</div>
-                    <div className="w-32">Route &amp; Dates</div>
-                    <div className="w-20 text-right">Qty</div>
+                    <div className="w-36">Vehicle Category</div>
+                    <div className="flex-1">Vehicle Details &amp; Inclusions</div>
+                    <div className="w-32">Route / Scope</div>
+                    <div className="w-16 text-right">Units</div>
                   </div>
                   {activeTransports.map((t, idx) => (
                     <div
                       key={idx}
-                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center"
+                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center text-[11px]"
                     >
-                      <div className="w-8 text-slate-500 font-medium">{idx + 1}</div>
-                      <div className="w-32 font-medium capitalize text-slate-800">
-                        {t.vehicleType || "Private Vehicle"}
+                      <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
+                      <div className="w-36 font-bold capitalize text-slate-900">
+                        {t.vehicleType || "Private AC Vehicle"}
                       </div>
-                      <div className="flex-1 text-slate-700 whitespace-pre-line text-[11px] leading-snug">
-                        {t.notes || "Dedicated Chauffeur"}
+                      <div className="flex-1 text-slate-700 whitespace-pre-line leading-tight">
+                        {t.notes || "Dedicated AC cab with chauffeur, fuel, toll taxes & parking"}
                       </div>
-                      <div className="w-32 text-slate-500 font-medium">{t.route || "--"}</div>
-                      <div className="w-20 text-right font-medium text-slate-800">
+                      <div className="w-32 text-slate-600 font-medium">{t.route || "All Transfers"}</div>
+                      <div className="w-16 text-right font-bold text-slate-800">
                         {t.vehiclesCount ? `${t.vehiclesCount} Unit(s)` : "1"}
                       </div>
                     </div>
@@ -516,71 +725,39 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
               </div>
             )}
 
-            {/* ACTIVITIES & EXCURSIONS Table (Only Rendered if User Added Sightseeings) */}
+            {/* ACTIVITIES & EXCURSIONS */}
             {activeActivities.length > 0 && (
               <div className="space-y-2 pt-1">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                  ACTIVITIES &amp; EXCURSIONS
-                </h3>
-                <div className="border border-slate-200 rounded-sm overflow-hidden text-xs">
-                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[11px]">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                    ACTIVITIES, EXCURSIONS &amp; EXPERIENCES
+                  </h3>
+                  <span className="text-[10px] text-slate-400 font-medium">Confirmed Sightseeing</span>
+                </div>
+
+                <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
+                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10.5px]">
                     <div className="w-8">#</div>
-                    <div className="flex-1">Activity</div>
-                    <div className="w-48">Location</div>
-                    <div className="w-32">Date</div>
+                    <div className="flex-1">Activity / Attraction</div>
+                    <div className="w-44">Location</div>
+                    <div className="w-28">Date</div>
                     <div className="w-16 text-right">Pax</div>
                   </div>
                   {activeActivities.map((act, idx) => (
                     <div
                       key={idx}
-                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center"
+                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center text-[11px]"
                     >
-                      <div className="w-8 text-slate-500 font-medium">{idx + 1}</div>
-                      <div className="flex-1 font-semibold text-slate-900 capitalize">{act.title}</div>
-                      <div className="w-48 text-slate-600 capitalize">{act.city || "--"}</div>
-                      <div className="w-32 text-slate-500">{act.date || quotationDate}</div>
-                      <div className="w-16 text-right font-medium text-slate-800">{act.pax || 1}</div>
+                      <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
+                      <div className="flex-1 font-bold text-slate-900 capitalize">{act.title}</div>
+                      <div className="w-44 text-slate-600 capitalize">{act.city || "--"}</div>
+                      <div className="w-28 text-slate-500">{act.date || quotationDate}</div>
+                      <div className="w-16 text-right font-bold text-slate-800">{act.pax || 1}</div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
-
-            {/* Inclusions & Exclusions */}
-            {(activeInclusions.length > 0 || activeExclusions.length > 0) && (
-              <div className="grid grid-cols-2 gap-4 pt-2">
-                {activeInclusions.length > 0 && (
-                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 mb-2">
-                      INCLUSIONS
-                    </p>
-                    <ul className="space-y-1 text-xs text-slate-700">
-                      {activeInclusions.map((inc, i) => (
-                        <li key={i} className="flex items-start gap-1.5">
-                          <span className="text-emerald-600 font-bold">•</span>
-                          <span>{inc}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {activeExclusions.length > 0 && (
-                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-rose-800 mb-2">
-                      EXCLUSIONS
-                    </p>
-                    <ul className="space-y-1 text-xs text-slate-700">
-                      {activeExclusions.map((exc, i) => (
-                        <li key={i} className="flex items-start gap-1.5">
-                          <span className="text-rose-500 font-bold">•</span>
-                          <span>{exc}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
@@ -588,110 +765,322 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
       )}
 
       {/* ========================================================================= */}
-      {/* PAGE: PAYMENT DETAILS (Showing User's Actual Bank & UPI Settings)          */}
+      {/* PAGE: INCLUSIONS, EXCLUSIONS, CANCELLATION & PRIVACY POLICY (GUARANTEED)  */}
       {/* ========================================================================= */}
-      {hasPaymentDetails && (
-        <div data-pdf-page className={PAGE}>
-          <div className="p-10 pb-20 space-y-6">
-            {/* PAYMENT DETAILS */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                PAYMENT DETAILS
-              </h3>
+      <div data-pdf-page className={PAGE}>
+        <div className="p-6 pb-12 space-y-2.5">
+          <QuotationHeaderMini
+            company={company}
+            quotationRef={quotationRef}
+            quotationDate={quotationDate}
+            validUntilDate={validUntilDate}
+          />
 
-              <div className="flex items-start justify-between gap-6 bg-white pt-1">
-                <div className="space-y-1.5 text-xs text-slate-700">
-                  {company.accountHolder && (
-                    <p>
-                      <span className="text-slate-500 font-medium">Account Holder:</span>{" "}
-                      <strong className="text-slate-900">{company.accountHolder}</strong>
-                    </p>
-                  )}
-                  {company.bankName && (
-                    <p>
-                      <span className="text-slate-500 font-medium">Bank Name:</span>{" "}
-                      <strong className="text-slate-900">{company.bankName}</strong>
-                    </p>
-                  )}
-                  {company.accountNumber && (
-                    <p>
-                      <span className="text-slate-500 font-medium">Account Number:</span>{" "}
-                      <strong className="font-mono text-slate-900">{company.accountNumber}</strong>
-                    </p>
-                  )}
-                  {company.ifsc && (
-                    <p>
-                      <span className="text-slate-500 font-medium">IFSC Code:</span>{" "}
-                      <strong className="font-mono text-slate-900">{company.ifsc}</strong>
-                    </p>
-                  )}
-                  {company.upiId && (
-                    <p>
-                      <span className="text-slate-500 font-medium">UPI ID:</span>{" "}
-                      <strong className="font-mono text-slate-900">{company.upiId}</strong>
-                    </p>
-                  )}
-                  {company.phone && (
-                    <p>
-                      <span className="text-slate-500 font-medium">UPI Phone:</span>{" "}
-                      <strong className="font-mono text-slate-900">{company.phone}</strong>
-                    </p>
-                  )}
+          <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+              INCLUSIONS, EXCLUSIONS &amp; TRAVEL POLICIES
+            </h3>
+            <span className="text-[10px] text-slate-400 font-medium">Standard Commercial Guidelines</span>
+          </div>
 
-                  <div className="flex items-center gap-2 pt-3">
-                    <span className="text-slate-400 font-medium text-[11px]">Supports:</span>
-                    <PaytmBadge />
-                    <GpayBadge />
-                    <PhonePeBadge />
-                  </div>
-                </div>
-
-                {/* QR Code Generated with User's UPI ID */}
-                {company.upiId && (
-                  <div className="flex flex-col items-center shrink-0">
-                    <div className="p-2 border border-slate-300 rounded-lg bg-white shadow-2xs">
-                      <UpiPaymentQr size={135} upiId={company.upiId} />
-                    </div>
-                    <span className="text-[9px] text-slate-400 font-medium mt-1">Scan &amp; Pay via UPI</span>
-                  </div>
-                )}
+          {/* 2-Column: INCLUSIONS & EXCLUSIONS */}
+          <div className="grid grid-cols-2 gap-3.5">
+            {/* Inclusions Card */}
+            <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center gap-1.5 border-b border-emerald-200/80 pb-1.5">
+                <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                  <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
+                </span>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-900">
+                  PACKAGE INCLUSIONS
+                </p>
               </div>
+
+              <ul className="space-y-1.5 text-[10.5px] text-slate-700">
+                {effectiveInclusions.length > 0 ? (
+                  effectiveInclusions.map((inc, i) => (
+                    <li key={i} className="flex items-start gap-2 leading-snug">
+                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 stroke-[2.5] mt-0.5" />
+                      <span className="font-medium text-slate-800">{inc}</span>
+                    </li>
+                  ))
+                ) : (
+                  <li className="text-[10px] text-slate-400 italic">No specific inclusions added</li>
+                )}
+              </ul>
             </div>
 
-            {/* Terms & Client Notes */}
+            {/* Exclusions Card */}
+            <div className="border border-rose-200 bg-rose-50/40 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center gap-1.5 border-b border-rose-200/80 pb-1.5">
+                <span className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shrink-0">
+                  <X className="w-2.5 h-2.5 text-white stroke-[3]" />
+                </span>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-rose-900">
+                  PACKAGE EXCLUSIONS
+                </p>
+              </div>
+
+              <ul className="space-y-1.5 text-[10.5px] text-slate-700">
+                {effectiveExclusions.length > 0 ? (
+                  effectiveExclusions.map((exc, i) => (
+                    <li key={i} className="flex items-start gap-2 leading-snug">
+                      <X className="w-3.5 h-3.5 text-rose-500 shrink-0 stroke-[2.5] mt-0.5" />
+                      <span className="font-medium text-slate-800">{exc}</span>
+                    </li>
+                  ))
+                ) : (
+                  <li className="text-[10px] text-slate-400 italic">No specific exclusions added</li>
+                )}
+              </ul>
+            </div>
+          </div>
+
+          {/* CANCELLATION & REFUND POLICY */}
+          <div className="border border-slate-200 bg-white rounded-xl p-3.5 space-y-2 shadow-2xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#1e3a8a]">
+                CANCELLATION &amp; REFUND GUIDELINES
+              </p>
+              <span className="text-[9.5px] text-slate-400">Calculated from departure date</span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center pt-0.5">
+              {DEFAULT_CANCELLATION_POLICY.map((p, idx) => (
+                <div
+                  key={idx}
+                  className="bg-slate-50 border border-slate-200/80 rounded-lg p-2 space-y-0.5"
+                >
+                  <p className="text-[10px] font-bold text-slate-500 uppercase">{p.period}</p>
+                  <p
+                    className={`text-xs font-black ${
+                      idx === 0
+                        ? "text-emerald-700"
+                        : idx === 1
+                        ? "text-amber-700"
+                        : "text-rose-700"
+                    }`}
+                  >
+                    {p.refund}
+                  </p>
+                  <p className="text-[9px] text-slate-400 leading-tight">{p.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* PRIVACY POLICY & TRAVELER DATA PROTECTION */}
+          <div className="border border-blue-200 bg-blue-50/30 rounded-xl p-3.5 space-y-1.5 shadow-2xs">
+            <div className="flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-[#1e3a8a] text-white flex items-center justify-center shrink-0">
+                <Lock className="w-2.5 h-2.5 text-white" />
+              </span>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-[#1e3a8a]">
+                PRIVACY POLICY &amp; DATA PROTECTION
+              </p>
+            </div>
+            <p className="text-[10.5px] text-slate-600 leading-relaxed font-normal">
+              We respect and safeguard your privacy. All traveler information, government identification proofs (Aadhaar / Passport), contact numbers, and billing details collected during the inquiry and booking process are used strictly for airline ticketing, hotel reservations, transport permits, and official travel vouchers. We never sell, rent, or disclose client data to unauthorized third parties.
+            </p>
+          </div>
+
+          {/* GENERAL TERMS & IMPORTANT NOTES */}
+          <div className="border border-slate-200 bg-slate-50/50 rounded-xl p-3 space-y-1.5">
+            <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-700">
+              GENERAL TERMS &amp; TRAVEL GUIDELINES
+            </p>
+            <ul className="space-y-1 text-[10px] text-slate-600">
+              <li className="flex items-start gap-1.5">
+                <span className="text-slate-400">•</span>
+                <span>Standard hotel check-in time is 14:00 hrs and check-out time is 11:00 hrs across all properties.</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="text-slate-400">•</span>
+                <span>Government-issued Photo ID (Aadhaar, Passport, or Voter ID) is mandatory for all adult guests upon check-in.</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="text-slate-400">•</span>
+                <span>Vehicles are provided for designated itinerary transfers and sightseeing; not available on a 24-hour disposal basis.</span>
+              </li>
+            </ul>
+
+            {/* User Custom Notes if any */}
             {clientNotes && (
-              <div className="pt-4 border-t border-slate-200 space-y-1">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                  TERMS &amp; SPECIAL NOTES
-                </h4>
-                <p className="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <div className="pt-2 border-t border-slate-200 mt-1">
+                <p className="text-[10px] font-bold uppercase text-teal-800 mb-0.5">Special Agent Notes:</p>
+                <p className="text-[10.5px] text-slate-700 whitespace-pre-line leading-relaxed bg-white p-2 rounded-lg border border-teal-200">
                   {clientNotes}
                 </p>
               </div>
             )}
           </div>
+        </div>
+
+        <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
+      </div>
+
+      {/* ========================================================================= */}
+      {/* PAGE: PAYMENT OPTIONS & BANK TRANSFER                                     */}
+      {/* ========================================================================= */}
+      {hasPaymentDetails && (
+        <div data-pdf-page className={PAGE}>
+          <div className="p-6 pb-12 space-y-3">
+            <QuotationHeaderMini
+              company={company}
+              quotationRef={quotationRef}
+              quotationDate={quotationDate}
+              validUntilDate={validUntilDate}
+            />
+
+            <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+                PAYMENT DETAILS &amp; BANK TRANSFER OPTIONS
+              </h3>
+              <span className="text-[10px] text-slate-400 font-medium">Secure Payment Gateway</span>
+            </div>
+
+            {/* Bank Card + QR Code */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-start justify-between gap-6">
+                <div className="space-y-2 text-xs text-slate-700 flex-1">
+                  <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+                    BANK TRANSFER DETAILS
+                  </p>
+
+                  {company.accountHolder && (
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span className="text-slate-500 font-medium">Account Name:</span>
+                      <strong className="text-slate-900">{company.accountHolder}</strong>
+                    </div>
+                  )}
+                  {company.bankName && (
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span className="text-slate-500 font-medium">Bank Name:</span>
+                      <strong className="text-slate-900">{company.bankName}</strong>
+                    </div>
+                  )}
+                  {company.accountNumber && (
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span className="text-slate-500 font-medium">Account Number:</span>
+                      <strong className="font-mono text-slate-900 text-sm tracking-wider">
+                        {company.accountNumber}
+                      </strong>
+                    </div>
+                  )}
+                  {company.ifsc && (
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span className="text-slate-500 font-medium">IFSC Code:</span>
+                      <strong className="font-mono text-slate-900 text-sm tracking-wider">
+                        {company.ifsc}
+                      </strong>
+                    </div>
+                  )}
+                  {company.upiId && (
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span className="text-slate-500 font-medium">UPI ID:</span>
+                      <strong className="font-mono text-teal-800 font-bold">{company.upiId}</strong>
+                    </div>
+                  )}
+                  {company.phone && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-medium">Phone / WhatsApp:</span>
+                      <strong className="font-mono text-slate-900">{company.phone}</strong>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <span className="text-slate-400 font-medium text-[10.5px]">Supported Modes:</span>
+                    <PaytmBadge />
+                    <GpayBadge />
+                    <PhonePeBadge />
+                    <span className="text-[10px] font-semibold text-slate-500 px-2 py-0.5 rounded bg-slate-100">
+                      NEFT / IMPS / RTGS
+                    </span>
+                  </div>
+                </div>
+
+                {/* Instant QR Code */}
+                {company.upiId && (
+                  <div className="flex flex-col items-center shrink-0 pl-4 border-l border-slate-200">
+                    <div className="p-2 border border-slate-300 rounded-xl bg-white shadow-2xs">
+                      <UpiPaymentQr size={130} upiId={company.upiId} />
+                    </div>
+                    <span className="text-[9.5px] font-bold text-teal-800 mt-1">Scan &amp; Pay via UPI</span>
+                    <span className="text-[8.5px] text-slate-400">Zero Convenience Fee</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* BOOKING PROCESS & CONFIRMATION MILESTONES */}
+            <div className="border border-slate-200 bg-slate-50/60 rounded-xl p-4 space-y-2">
+              <p className="text-[10.5px] font-bold uppercase tracking-wider text-[#1e3a8a]">
+                BOOKING &amp; CONFIRMATION MILESTONES
+              </p>
+              <div className="grid grid-cols-3 gap-2.5 text-xs">
+                <div className="bg-white rounded-lg p-2.5 border border-slate-200 space-y-1">
+                  <span className="text-xs font-black text-teal-700">01. Deposit</span>
+                  <p className="font-bold text-slate-800 text-[11px]">25% Advance</p>
+                  <p className="text-[9.5px] text-slate-500 leading-tight">
+                    Secures hotel reservations and vehicle fleet block.
+                  </p>
+                </div>
+                <div className="bg-white rounded-lg p-2.5 border border-slate-200 space-y-1">
+                  <span className="text-xs font-black text-blue-700">02. Balance</span>
+                  <p className="font-bold text-slate-800 text-[11px]">75% Balance</p>
+                  <p className="text-[9.5px] text-slate-500 leading-tight">
+                    Payable 15 days prior to scheduled tour departure.
+                  </p>
+                </div>
+                <div className="bg-white rounded-lg p-2.5 border border-slate-200 space-y-1">
+                  <span className="text-xs font-black text-emerald-700">03. Vouchers</span>
+                  <p className="font-bold text-slate-800 text-[11px]">Travel Vouchers</p>
+                  <p className="text-[9.5px] text-slate-500 leading-tight">
+                    Receive verified hotel vouchers and driver contact details.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* AUTHORIZED SIGN-OFF & STAMP */}
+            <div className="pt-2 flex items-end justify-between text-xs text-slate-600">
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase font-bold text-slate-400">QUOTATION ISSUED BY</p>
+                <p className="font-bold text-slate-900 text-sm">{company.name || "Authorized Travel Partner"}</p>
+                <p className="text-[11px] text-slate-500">
+                  {[company.email, company.phone].filter(Boolean).join(" · ")}
+                </p>
+              </div>
+
+              <div className="text-center space-y-1">
+                <div className="w-40 h-16 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-[10px] text-slate-400 bg-white">
+                  Authorized Sign &amp; Seal
+                </div>
+                <p className="text-[9px] text-slate-400">Official Travel Specialist Signature</p>
+              </div>
+            </div>
+          </div>
 
           <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* PAGE: GUEST PICTURES / DESTINATION SHOWCASE                               */}
+      {/* PAGE: GUEST PICTURES (ONLY IF USER UPLOADED ACTUAL GUEST PHOTOS)          */}
       {/* ========================================================================= */}
-      {hasGuestPhotos && (
+      {hasActualGuestPhotos && (
         <div data-pdf-page className={PAGE}>
           <div className="h-full flex flex-col justify-between items-center p-10 pb-20 text-center">
             <h2 className="text-2xl font-bold text-slate-800 tracking-tight pt-2">
-              Our Guest pictures
+              Our Guest Pictures &amp; Memories
             </h2>
 
-            {/* Large Center Guest Photo */}
-            <div className="my-auto max-w-[170mm] max-h-[195mm] overflow-hidden rounded-sm border border-slate-200 shadow-md">
+            <div className="my-auto max-w-[170mm] max-h-[195mm] overflow-hidden rounded-xl border border-slate-200 shadow-md">
               <img
-                src={guestPhotos[0] || heroImage}
+                src={guestPhotos[0]}
                 alt="Our Guests"
                 className="w-full h-full object-cover max-h-[195mm]"
-                crossOrigin={getSafeCrossOrigin(guestPhotos[0] || heroImage)}
+                crossOrigin={getSafeCrossOrigin(guestPhotos[0])}
               />
             </div>
 
@@ -710,8 +1099,117 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
 }
 
 // =========================================================================
-// HELPER COMPONENTS & LOGOS
+// HELPER COMPONENTS
 // =========================================================================
+
+function getDayMeals(day: DetailedItineraryDay, totalDays: number, defaultHotelPlan?: string): string {
+  if (day.meals && day.meals.trim()) return day.meals;
+
+  const desc = (day.description || "").toLowerCase();
+  const hasBreakfast = desc.includes("breakfast");
+  const hasLunch = desc.includes("lunch");
+  const hasDinner = desc.includes("dinner");
+
+  if (hasBreakfast && hasDinner) return "Breakfast & Dinner";
+  if (hasBreakfast && hasLunch && hasDinner) return "All Meals";
+  if (hasBreakfast) return "Breakfast";
+  if (hasDinner) return "Dinner";
+
+  if (defaultHotelPlan) {
+    if (defaultHotelPlan.includes("MAP") || defaultHotelPlan.toLowerCase().includes("dinner")) {
+      return "Breakfast & Dinner";
+    }
+    if (defaultHotelPlan.includes("CP") || defaultHotelPlan.toLowerCase().includes("breakfast")) {
+      return "Breakfast";
+    }
+    if (defaultHotelPlan.includes("AP")) return "All Meals";
+  }
+
+  if (day.day === 1) return "Dinner";
+  if (day.day === totalDays && totalDays > 1) return "Breakfast";
+  return "Breakfast & Dinner";
+}
+
+function getDayHighlights(day: DetailedItineraryDay): string {
+  if (day.highlights && day.highlights.length > 0) {
+    return day.highlights.join(", ");
+  }
+  if (day.activities && day.activities.trim() && day.activities !== day.title) {
+    return day.activities;
+  }
+  if (day.destination) {
+    return `${day.destination} sightseeing, local transfers & photo stops`;
+  }
+  return "";
+}
+
+function DayTimelineItem({
+  day,
+  totalDays,
+  hotelMealPlan,
+}: {
+  day: DetailedItineraryDay;
+  totalDays: number;
+  hotelMealPlan?: string;
+}) {
+  const photo = day.images?.[0];
+  const cleanTitle = day.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, "").trim() || "Tour & Sightseeing";
+  const meals = getDayMeals(day, totalDays, hotelMealPlan);
+  const highlights = getDayHighlights(day);
+
+  return (
+    <div className="relative flex items-start gap-3">
+      {/* Timeline Circle Node matching screenshot */}
+      <div className="absolute -left-7 top-2 w-5 h-5 rounded-full bg-[#0284c7] text-white flex items-center justify-center font-bold text-[10px] shadow-xs z-10 shrink-0 ring-2 ring-white">
+        {day.day}
+      </div>
+
+      {/* Day Card */}
+      <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/90 p-2.5 shadow-2xs space-y-1">
+        {/* Top Header of Card: Day Title on left, Meals badge on right */}
+        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-0.5">
+          <h4 className="text-xs font-bold text-slate-900 leading-snug">
+            Day {day.day}: {cleanTitle}
+          </h4>
+          <span className="shrink-0 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/90 text-[9px] font-semibold tracking-tight">
+            Meals: {meals}
+          </span>
+        </div>
+
+        {/* Content & Small Image on the side */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0 space-y-0.5">
+            <p className="text-[10px] text-slate-600 leading-relaxed font-normal whitespace-pre-line">
+              {day.description}
+            </p>
+
+            {highlights && (
+              <div className="flex items-start gap-1 text-[9.5px] pt-0.5 border-t border-slate-100 leading-tight">
+                <Sparkles className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-slate-600">
+                  <strong className="text-slate-800 font-bold">Highlights: </strong>
+                  <span>{highlights}</span>
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Small image in side */}
+          {photo && (
+            <div className="w-[34mm] h-[22mm] shrink-0 overflow-hidden rounded-lg border border-slate-200/90 shadow-2xs bg-slate-50">
+              <img
+                src={photo}
+                alt={day.title}
+                className="w-full h-full object-cover"
+                crossOrigin={getSafeCrossOrigin(photo)}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function QuotationPageFooter({
   pageNum,
@@ -729,8 +1227,8 @@ function QuotationPageFooter({
 }) {
   return (
     <>
-      <div className="absolute bottom-8 left-0 right-0 text-center text-[9.5px] text-slate-400 font-normal">
-        This quotation is valid until the date mentioned above. Prices are subject to availability.
+      <div className="absolute bottom-8 left-0 right-0 text-center text-[9px] text-slate-400 font-normal">
+        This quotation is valid until the date mentioned above. Prices and availability are subject to re-confirmation.
       </div>
       <div className="absolute bottom-0 left-0 right-0 h-7 bg-[#0b5c53] text-white flex items-center justify-between px-6 text-[9.5px] font-medium tracking-tight">
         <div className="flex items-center gap-3">
@@ -778,7 +1276,6 @@ function CompanyLogo({
 
   const cleanName = (name || "Agency").replace(/^\./, "").trim();
 
-  // If no logo or if it failed to load, render a crisp agency monogram badge
   if (!logo || loadError) {
     const isSmall = className.includes("h-10") || className.includes("w-8") || className.includes("max-w-[120px]");
     return (
@@ -794,7 +1291,6 @@ function CompanyLogo({
     );
   }
 
-  // Resolve URL (handles relative path, /uploads/..., etc.)
   let resolvedUrl = logo;
   if (!resolvedUrl.startsWith("data:") && !resolvedUrl.startsWith("blob:") && !resolvedUrl.startsWith("http")) {
     const rawApi = (import.meta.env.VITE_API_URL || "http://localhost:8000").trim();
@@ -809,7 +1305,6 @@ function CompanyLogo({
       alt={cleanName}
       className={className}
       onError={() => {
-        // Fallback to monogram gracefully so no broken icon is shown
         setLoadError(true);
       }}
     />
@@ -828,7 +1323,7 @@ function QuotationHeaderMini({
   validUntilDate?: string;
 }) {
   return (
-    <div className="flex items-start justify-between pb-3 border-b border-slate-200">
+    <div className="flex items-start justify-between pb-2.5 border-b border-slate-200">
       <div className="flex items-start gap-3">
         <CompanyLogo
           logo={company.logo}
@@ -840,10 +1335,10 @@ function QuotationHeaderMini({
           <h2 className="text-base font-black tracking-wide uppercase text-[#1e3a8a] leading-none">
             {company.name || "TRAVEL QUOTATION"}
           </h2>
-          {company.website && <p className="text-[11px] text-slate-500 leading-tight">{company.website}</p>}
-          {company.address && <p className="text-[11px] text-slate-500 leading-tight">{company.address}</p>}
+          {company.website && <p className="text-[10.5px] text-slate-500 leading-tight">{company.website}</p>}
+          {company.address && <p className="text-[10.5px] text-slate-500 leading-tight">{company.address}</p>}
           {(company.phone || company.email) && (
-            <p className="text-[11px] text-slate-500 leading-tight">
+            <p className="text-[10.5px] text-slate-500 leading-tight">
               {[company.phone, company.email].filter(Boolean).join(" | ")}
             </p>
           )}
@@ -851,66 +1346,17 @@ function QuotationHeaderMini({
       </div>
 
       <div className="text-right text-xs space-y-0.5 text-slate-600">
-        <p className="text-xs uppercase font-semibold tracking-wider text-slate-400">QUOTATION</p>
-        <p className="font-bold text-slate-900">
-          No: <span className="font-medium text-slate-700">{quotationRef}</span>
+        <p className="text-[10.5px] uppercase font-bold tracking-wider text-slate-400">QUOTATION</p>
+        <p className="font-bold text-slate-900 text-[11px]">
+          Ref: <span className="font-medium text-slate-700">{quotationRef}</span>
         </p>
-        <p className="font-bold text-slate-900">
+        <p className="font-bold text-slate-900 text-[11px]">
           Date: <span className="font-medium text-slate-700">{quotationDate}</span>
         </p>
-        <p className="font-bold text-slate-900">
+        <p className="font-bold text-slate-900 text-[11px]">
           Valid: <span className="font-medium text-slate-700">{validUntilDate}</span>
         </p>
       </div>
-    </div>
-  );
-}
-
-function DaySectionItem({
-  day,
-  isFirst,
-}: {
-  day: DetailedItineraryDay;
-  isFirst?: boolean;
-}) {
-  const photo = day.images?.[0];
-  const locationText = day.destination
-    ? day.destination.startsWith("Location:")
-      ? day.destination
-      : `Location: ${day.destination}`
-    : "";
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2">
-        <span className="px-2.5 py-0.5 rounded-full bg-[#1e3a8a] text-white font-bold text-[10px] tracking-wider uppercase">
-          DAY {day.day}
-        </span>
-        <h4 className="text-sm font-bold text-slate-900">{day.title}</h4>
-      </div>
-
-      {locationText && <p className="text-[11px] text-slate-500 font-medium">{locationText}</p>}
-
-      {day.description && (
-        <p className="text-[11px] text-slate-700 leading-relaxed font-normal whitespace-pre-line">
-          {day.description}
-        </p>
-      )}
-
-      {photo && (
-        <div
-          className={`w-full overflow-hidden rounded-none shadow-xs mt-1.5 ${
-            isFirst ? "h-[56mm]" : "h-[50mm]"
-          }`}
-        >
-          <img
-            src={photo}
-            alt={day.title}
-            className="w-full h-full object-cover"
-            crossOrigin={getSafeCrossOrigin(photo)}
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -920,10 +1366,6 @@ function getOrdinalSuffix(n: number) {
   const v = n % 100;
   return s[(v - 20) % 10] || s[v] || s[0];
 }
-
-// -------------------------------------------------------------
-// Vector Badges (MOT, IATA, IATO, TAAI, ADTOI, ATOAI)
-// -------------------------------------------------------------
 
 function MotBadge() {
   return (
@@ -1003,7 +1445,7 @@ function AtoaiBadge() {
   );
 }
 
-function UpiPaymentQr({ size = 135, upiId }: { size?: number; upiId: string }) {
+function UpiPaymentQr({ size = 130, upiId }: { size?: number; upiId: string }) {
   return (
     <div style={{ width: size, height: size }} className="relative flex items-center justify-center bg-white">
       <svg width={size} height={size} viewBox="0 0 100 100" fill="none">

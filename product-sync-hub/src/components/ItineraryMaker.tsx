@@ -42,6 +42,14 @@ import {
   ZoomOut,
   Maximize2,
   Plus,
+  Bus,
+  Train,
+  Ship,
+  Anchor,
+  FileCheck,
+  Ticket,
+  UserCheck,
+  ArrowRight,
 } from "lucide-react";
 import {
   DetailedItineraryDay,
@@ -156,6 +164,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   const [newDayTitle, setNewDayTitle] = useState("");
   const [newDayDescription, setNewDayDescription] = useState("");
   const [newDayImageUrl, setNewDayImageUrl] = useState("");
+  const [newDayHighlights, setNewDayHighlights] = useState("");
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // Pre-fed Destination Itineraries Library
@@ -272,10 +281,32 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     notes: "",
   });
 
-  // 10. Inclusions & Exclusions
+  // 10. Inclusions & Exclusions (Blank clean start - user can add custom items)
   const [inclusions, setInclusions] = useState<string[]>([]);
   const [exclusions, setExclusions] = useState<string[]>([]);
+  const [newInclusionInput, setNewInclusionInput] = useState("");
+  const [newExclusionInput, setNewExclusionInput] = useState("");
   const [clientNotes, setClientNotes] = useState("");
+
+  const handleAddInclusion = () => {
+    const val = newInclusionInput.trim();
+    if (val) {
+      if (!inclusions.includes(val)) {
+        setInclusions((prev) => [...prev, val]);
+      }
+      setNewInclusionInput("");
+    }
+  };
+
+  const handleAddExclusion = () => {
+    const val = newExclusionInput.trim();
+    if (val) {
+      if (!exclusions.includes(val)) {
+        setExclusions((prev) => [...prev, val]);
+      }
+      setNewExclusionInput("");
+    }
+  };
 
   // 11. Quotation Settings & Policies (WITHOUT AGENT PRICE)
   const [selectedTheme, setSelectedTheme] = useState<string>("teal");
@@ -439,8 +470,9 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
         day: newDayNumber,
         destination: newDayDestination,
         title: newDayTitle,
-        activities: newDayTitle,
+        activities: newDayHighlights || newDayTitle,
         description: newDayDescription,
+        highlights: newDayHighlights ? newDayHighlights.split(/[,•;]+/).map((h) => h.trim()).filter(Boolean) : undefined,
         images: newDayImageUrl ? [newDayImageUrl] : updated[editingDayIndex].images,
       };
       setDays(updated);
@@ -451,8 +483,9 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
         day: days.length + 1,
         destination: newDayDestination,
         title: newDayTitle,
-        activities: newDayTitle,
+        activities: newDayHighlights || newDayTitle,
         description: newDayDescription,
+        highlights: newDayHighlights ? newDayHighlights.split(/[,•;]+/).map((h) => h.trim()).filter(Boolean) : undefined,
         images: newDayImageUrl ? [newDayImageUrl] : [],
       };
       setDays([...days, newDay]);
@@ -486,6 +519,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     setNewDayDescription("");
     setNewDayImageUrl("");
     setNewDayDestination("");
+    setNewDayHighlights("");
     setSelectedDayTemplateId("");
     setNewDayNumber(days.length + 2);
   };
@@ -497,6 +531,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     setNewDayDestination(d.destination || destination || "");
     setNewDayTitle(d.title);
     setNewDayDescription(d.description);
+    setNewDayHighlights(d.highlights?.join(", ") || (d.activities && d.activities !== d.title ? d.activities : ""));
     setNewDayImageUrl(d.images[0] || "");
     setSectionsOpen((p) => ({ ...p, itinerary: true }));
   };
@@ -1442,95 +1477,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                     <span>Calculated Duration: {duration} ({dateRange})</span>
                   </div>
 
-                  {/* Quotation Cover Photo (Travel Background) */}
-                  <div className="rounded-xl border border-teal-100 bg-teal-50/40 p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                          <Camera className="w-3.5 h-3.5 text-teal-600" />
-                          <span>Quotation Cover Photo (Travel Wallpaper)</span>
-                        </Label>
-                        <p className="text-[11px] text-slate-500">
-                          Select a travel destination wallpaper or enter your custom image URL
-                        </p>
-                      </div>
-                      {heroImage && (
-                        <button
-                          type="button"
-                          onClick={() => setHeroImage("")}
-                          className="text-[11px] text-slate-500 hover:text-rose-600 transition-colors"
-                        >
-                          Reset Default
-                        </button>
-                      )}
-                    </div>
 
-                    {/* Quick 1-Click Travel Wallpaper Presets */}
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                      {[
-                        {
-                          id: "beach",
-                          name: "Tropical Beach",
-                          icon: "🏖️",
-                          url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600",
-                        },
-                        {
-                          id: "maldives",
-                          name: "Luxury Resort",
-                          icon: "🏝️",
-                          url: "https://images.unsplash.com/photo-1514282401047-d79a71a590e8?auto=format&fit=crop&q=80&w=1600",
-                        },
-                        {
-                          id: "mountains",
-                          name: "Hills & Mountains",
-                          icon: "🏔️",
-                          url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&q=80&w=1600",
-                        },
-                        {
-                          id: "dubai",
-                          name: "Dubai Skyline",
-                          icon: "🏙️",
-                          url: "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&q=80&w=1600",
-                        },
-                        {
-                          id: "heritage",
-                          name: "Europe / Heritage",
-                          icon: "🏛️",
-                          url: "https://images.unsplash.com/photo-1570077188670-e3a8d69ac5ff?auto=format&fit=crop&q=80&w=1600",
-                        },
-                      ].map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => setHeroImage(preset.url)}
-                          className={cn(
-                            "flex items-center gap-1.5 p-2 rounded-lg border text-xs font-semibold text-left transition-all",
-                            heroImage === preset.url
-                              ? "bg-teal-50 border-teal-500 text-teal-800 ring-1 ring-teal-500 shadow-2xs"
-                              : "bg-white border-slate-200 text-slate-700 hover:bg-slate-100"
-                          )}
-                        >
-                          <span className="text-base">{preset.icon}</span>
-                          <span className="truncate">{preset.name}</span>
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Custom Image URL input */}
-                    <div className="flex items-center gap-2 pt-1">
-                      <Input
-                        value={heroImage}
-                        onChange={(e) => setHeroImage(e.target.value)}
-                        placeholder="Paste custom travel image URL (or click any preset above)..."
-                        className="h-9 text-xs rounded-lg border-slate-200 bg-white"
-                      />
-                      {heroImage && (
-                        <div className="w-12 h-9 rounded-lg overflow-hidden border border-slate-200 shrink-0">
-                          <img src={heroImage} alt="Cover preview" className="w-full h-full object-cover" />
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </div>
               )}
             </Card>
@@ -1640,7 +1587,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                             <option value="">-- Choose Pre-fed Destination --</option>
                             {destLibrary.map((d) => (
                               <option key={d.id} value={d.id}>
-                                📍 {d.name} ({d.days.length} Days)
+                                {d.name} ({d.days.length} Days)
                               </option>
                             ))}
                           </select>
@@ -1727,8 +1674,18 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       <Input
                         value={newDayTitle}
                         onChange={(e) => setNewDayTitle(e.target.value)}
-                        placeholder="e.g. Arrival & Evening City Walk"
+                        placeholder="e.g. Arrival in Srinagar & Dal Lake Sunset Shikara Ride"
                         className="h-10 bg-white"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-bold text-slate-600">Key Highlights</Label>
+                      <Input
+                        value={newDayHighlights}
+                        onChange={(e) => setNewDayHighlights(e.target.value)}
+                        placeholder="e.g. Airport transfer, Shikara ride, Boulevard road stroll"
+                        className="h-10 bg-white text-xs"
                       />
                     </div>
 
@@ -1833,62 +1790,75 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         No days added yet. Fill in the form above and click "+ Add Day to Itinerary".
                       </div>
                     ) : (
-                      <div className="space-y-2.5">
+                      <div className="relative pl-7 space-y-3 before:absolute before:left-[11px] before:top-3.5 before:bottom-3.5 before:w-[2px] before:bg-sky-200">
                         {days.map((day, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between gap-3 p-3 sm:p-4 rounded-xl border border-slate-200 bg-white hover:border-teal-200 transition-all shadow-sm"
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              {day.images[0] ? (
-                                <img
-                                  src={day.images[0]}
-                                  alt=""
-                                  className="w-14 h-14 rounded-lg object-cover border border-slate-100 shrink-0"
-                                />
-                              ) : (
-                                <div className="w-14 h-14 rounded-lg bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-700 shrink-0 font-bold">
-                                  D{day.day}
-                                </div>
-                              )}
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded">
-                                    Day {day.day}
-                                  </span>
-                                  {day.destination && (
-                                    <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
-                                      <MapPin className="w-3 h-3 text-slate-400" />
-                                      {day.destination}
-                                    </span>
-                                  )}
-                                </div>
-                                <h4 className="text-sm font-bold text-slate-800 truncate mt-1">{day.title}</h4>
-                                <p className="text-xs text-slate-400 truncate max-w-md mt-0.5">
-                                  {day.activities || day.description?.replace(/\n/g, " ")}
-                                </p>
-                              </div>
+                          <div key={idx} className="relative flex items-start gap-3">
+                            {/* Blue Numbered Circle matching screenshot */}
+                            <div className="absolute -left-7 top-3 w-5 h-5 rounded-full bg-[#0284c7] text-white flex items-center justify-center font-bold text-[10px] shadow-xs z-10 shrink-0 ring-2 ring-white">
+                              {day.day}
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleEditDay(idx)}
-                                className="h-8 w-8 text-slate-500 hover:text-teal-700 hover:bg-teal-50"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleRemoveDay(idx)}
-                                className="h-8 w-8 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                            {/* Timeline Day Card with Small Image in side */}
+                            <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/90 p-3.5 shadow-sm hover:border-sky-300 transition-all space-y-2">
+                              <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
+                                <h4 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                                  Day {day.day}: {day.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, "")}
+                                </h4>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {day.meals && (
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/90 text-[10px] font-semibold">
+                                      Meals: {day.meals}
+                                    </span>
+                                  )}
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleEditDay(idx)}
+                                    className="h-7 w-7 text-slate-500 hover:text-teal-700 hover:bg-teal-50"
+                                    title="Edit Day"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleRemoveDay(idx)}
+                                    className="h-7 w-7 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                                    title="Remove Day"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </div>
+                              </div>
+
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0 space-y-1.5">
+                                  <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
+                                    {day.description}
+                                  </p>
+                                  {(day.highlights?.length || (day.activities && day.activities !== day.title)) && (
+                                    <div className="flex items-center gap-1 text-[11px] text-slate-500 pt-0.5">
+                                      <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                      <span className="font-semibold text-slate-700">Highlights:</span>
+                                      <span className="truncate">
+                                        {day.highlights?.join(", ") || day.activities}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {day.images?.[0] && (
+                                  <div className="w-24 h-16 sm:w-28 sm:h-20 shrink-0 rounded-lg overflow-hidden border border-slate-200 shadow-2xs">
+                                    <img
+                                      src={day.images[0]}
+                                      alt={day.title}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -2608,7 +2578,9 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         <div key={idx} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50 text-xs">
                           <div className="space-y-0.5">
                             <p className="font-bold text-slate-800">{f.airline || "Flight"} · {f.flightNo}</p>
-                            <p className="text-slate-500">{f.departure} ➔ {f.arrival} · {f.baggage}</p>
+                            <p className="text-slate-500 flex items-center gap-1">
+                              {f.departure} <ArrowRight className="w-3 h-3 text-slate-400 shrink-0 inline" /> {f.arrival} · {f.baggage}
+                            </p>
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="font-bold text-teal-800">₹{(f.price || 0).toLocaleString("en-IN")}</span>
@@ -2668,16 +2640,17 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       </Label>
                       <div className="flex flex-wrap gap-1.5">
                         {[
-                          { label: "Bus", icon: "🚌" },
-                          { label: "Train", icon: "🚆" },
-                          { label: "Ferry / Boat", icon: "⛴️" },
-                          { label: "Cruise", icon: "🛳️" },
-                          { label: "Visa Fee", icon: "🛂" },
-                          { label: "Travel Insurance", icon: "🛡️" },
-                          { label: "Tour Guide", icon: "👤" },
-                          { label: "Entry Permit", icon: "🎟️" },
-                          { label: "Custom Entity", icon: "✨" },
+                          { label: "Bus", icon: Bus },
+                          { label: "Train", icon: Train },
+                          { label: "Ferry / Boat", icon: Anchor },
+                          { label: "Cruise", icon: Ship },
+                          { label: "Visa Fee", icon: FileCheck },
+                          { label: "Travel Insurance", icon: ShieldCheck },
+                          { label: "Tour Guide", icon: UserCheck },
+                          { label: "Entry Permit", icon: Ticket },
+                          { label: "Custom Entity", icon: Sparkles },
                         ].map((preset) => {
+                          const IconComp = preset.icon;
                           const isSelected = (customEntityForm.category || "").toLowerCase() === preset.label.toLowerCase();
                           return (
                             <button
@@ -2685,13 +2658,13 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                               type="button"
                               onClick={() => setCustomEntityForm({ ...customEntityForm, category: preset.label })}
                               className={cn(
-                                "px-2.5 py-1 rounded-lg text-xs transition-colors flex items-center gap-1 border",
+                                "px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center gap-1.5 border",
                                 isSelected
                                   ? "bg-teal-700 text-white border-teal-700 font-semibold shadow-xs"
                                   : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
                               )}
                             >
-                              <span>{preset.icon}</span>
+                              <IconComp className="w-3.5 h-3.5 shrink-0" />
                               <span>{preset.label}</span>
                             </button>
                           );
@@ -2861,9 +2834,32 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         >
                           <div className="space-y-1 min-w-0 pr-2">
                             <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200 uppercase tracking-wider">
-                                {cs.category || "Service"}
-                              </span>
+                              {(() => {
+                                const cat = (cs.category || "").toLowerCase();
+                                const Icon = cat.includes("bus")
+                                  ? Bus
+                                  : cat.includes("train")
+                                  ? Train
+                                  : cat.includes("ferry") || cat.includes("boat")
+                                  ? Anchor
+                                  : cat.includes("cruise") || cat.includes("ship")
+                                  ? Ship
+                                  : cat.includes("visa")
+                                  ? FileCheck
+                                  : cat.includes("insurance")
+                                  ? ShieldCheck
+                                  : cat.includes("guide")
+                                  ? UserCheck
+                                  : cat.includes("permit") || cat.includes("ticket") || cat.includes("entry")
+                                  ? Ticket
+                                  : Sparkles;
+                                return (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200 uppercase tracking-wider inline-flex items-center gap-1">
+                                    <Icon className="w-3 h-3 text-teal-600 shrink-0" />
+                                    {cs.category || "Service"}
+                                  </span>
+                                );
+                              })()}
                               <span className="font-bold text-slate-800 truncate">{cs.title}</span>
                             </div>
                             {(cs.details || cs.date || cs.quantity) && (
@@ -2985,40 +2981,53 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                       Inclusions
                     </Label>
-                    <div className="flex flex-wrap gap-2">
-                      {inclusions.map((inc, i) => (
-                        <span
-                          key={i}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80"
-                        >
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          {inc}
-                          <button
-                            type="button"
-                            onClick={() => setInclusions(inclusions.filter((_, idx) => idx !== i))}
-                            className="hover:text-rose-600 ml-1"
+                    {inclusions.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">No inclusions added yet. Add custom inclusions below.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {inclusions.map((inc, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200/80"
                           >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            {inc}
+                            <button
+                              type="button"
+                              onClick={() => setInclusions(inclusions.filter((_, idx) => idx !== i))}
+                              className="hover:text-rose-600 ml-1"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {/* Add Custom Inclusion */}
                     <div className="flex gap-2 pt-1 max-w-md">
                       <Input
                         placeholder="+ Add custom inclusion item..."
                         id="new-inclusion-input"
+                        value={newInclusionInput}
+                        onChange={(e) => setNewInclusionInput(e.target.value)}
                         className="h-8 text-xs bg-slate-50 border-slate-200"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
-                            const val = (e.target as HTMLInputElement).value.trim();
-                            if (val) {
-                              setInclusions([...inclusions, val]);
-                              (e.target as HTMLInputElement).value = "";
-                            }
+                            e.preventDefault();
+                            handleAddInclusion();
                           }
                         }}
                       />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleAddInclusion}
+                        className="h-8 px-3 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1" />
+                        Add
+                      </Button>
                     </div>
                   </div>
 
@@ -3028,40 +3037,53 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       <XCircle className="w-4 h-4 text-rose-600" />
                       Exclusions
                     </Label>
-                    <div className="flex flex-wrap gap-2">
-                      {exclusions.map((exc, i) => (
-                        <span
-                          key={i}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200/80"
-                        >
-                          <X className="w-3.5 h-3.5 text-rose-600" />
-                          {exc}
-                          <button
-                            type="button"
-                            onClick={() => setExclusions(exclusions.filter((_, idx) => idx !== i))}
-                            className="hover:text-rose-900 ml-1"
+                    {exclusions.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic">No exclusions added yet. Add custom exclusions below.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {exclusions.map((exc, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200/80"
                           >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
+                            <X className="w-3.5 h-3.5 text-rose-600" />
+                            {exc}
+                            <button
+                              type="button"
+                              onClick={() => setExclusions(exclusions.filter((_, idx) => idx !== i))}
+                              className="hover:text-rose-900 ml-1"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {/* Add Custom Exclusion */}
                     <div className="flex gap-2 pt-1 max-w-md">
                       <Input
                         placeholder="+ Add custom exclusion item..."
                         id="new-exclusion-input"
+                        value={newExclusionInput}
+                        onChange={(e) => setNewExclusionInput(e.target.value)}
                         className="h-8 text-xs bg-slate-50 border-slate-200"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
-                            const val = (e.target as HTMLInputElement).value.trim();
-                            if (val) {
-                              setExclusions([...exclusions, val]);
-                              (e.target as HTMLInputElement).value = "";
-                            }
+                            e.preventDefault();
+                            handleAddExclusion();
                           }
                         }}
                       />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleAddExclusion}
+                        className="h-8 px-3 text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1" />
+                        Add
+                      </Button>
                     </div>
                   </div>
 

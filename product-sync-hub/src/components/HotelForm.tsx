@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ImageUpload } from "./ImageUpload";
-import { Hotel, Phone, MapPin, Star, Plus } from "lucide-react";
+import { Hotel, Phone, MapPin, Star, Plus, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Product } from "@/lib/types";
 
@@ -257,7 +257,9 @@ export function HotelForm({ onSubmit, initialData, trigger }: HotelFormProps) {
                       placeholder="e.g. Swimming Pool"
                       className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 h-9"
                     />
-                    <button type="button" onClick={() => removeAmenity(index)} className="text-red-500 hover:text-red-600 dark:text-red-400 font-bold px-1">✕</button>
+                    <button type="button" onClick={() => removeAmenity(index)} className="text-red-500 hover:text-red-600 dark:text-red-400 p-1">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 ))}
               </div>

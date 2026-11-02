@@ -110,7 +110,7 @@ export function ProductForm({ onSubmit, initialData, trigger }: ProductFormProps
                       id="p-title" 
                       value={title} 
                       onChange={(e) => setTitle(e.target.value)} 
-                      placeholder="e.g. ✨ Premium Studio Over-Ear Headphones"
+                      placeholder="e.g. Premium Studio Over-Ear Headphones"
                       className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                     />
                   </div>

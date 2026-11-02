@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { ImageUpload } from "./ImageUpload";
-import { Plane, Phone, Plus, Star, Sparkles, Loader2, Eye } from "lucide-react";
+import { Plane, Phone, Plus, Star, Sparkles, Loader2, Eye, Image as ImageIcon, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { Product, ItineraryDay } from "@/lib/types";
 import { packPackageDescription, normalizeProduct, cleanDisplayDescription } from "@/lib/packageParser";
@@ -540,9 +540,9 @@ export function TravelPackageForm({ onSubmit, initialData, trigger }: TravelPack
                           <button
                             type="button"
                             onClick={() => removeListItem(i, 'inc')}
-                            className="text-red-500 hover:text-red-600 dark:text-red-400 font-bold px-1.5 transition-colors"
+                            className="text-red-500 hover:text-red-600 dark:text-red-400 p-1 transition-colors"
                           >
-                            ✕
+                            <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ))}
@@ -575,9 +575,9 @@ export function TravelPackageForm({ onSubmit, initialData, trigger }: TravelPack
                           <button
                             type="button"
                             onClick={() => removeListItem(i, 'exc')}
-                            className="text-red-500 hover:text-red-600 dark:text-red-400 font-bold px-1.5 transition-colors"
+                            className="text-red-500 hover:text-red-600 dark:text-red-400 p-1 transition-colors"
                           >
-                            ✕
+                            <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ))}
@@ -612,9 +612,9 @@ export function TravelPackageForm({ onSubmit, initialData, trigger }: TravelPack
                           <button
                             type="button"
                             onClick={() => removeListItem(i, 'act')}
-                            className="text-red-500 hover:text-red-600 dark:text-red-400 font-bold px-1.5 transition-colors"
+                            className="text-red-500 hover:text-red-600 dark:text-red-400 p-1 transition-colors"
                           >
-                            ✕
+                            <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ))}
@@ -702,7 +702,7 @@ export function TravelPackageForm({ onSubmit, initialData, trigger }: TravelPack
                               className="shrink-0 h-10 w-10 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300"
                               title="Upload Day Image"
                             >
-                              {uploadingDayIdx === index ? <Loader2 className="w-4 h-4 animate-spin" /> : "🖼️"}
+                              {uploadingDayIdx === index ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4 text-slate-500" />}
                             </Button>
                           </div>
                         </div>
@@ -750,10 +750,10 @@ export function TravelPackageForm({ onSubmit, initialData, trigger }: TravelPack
                                 <button
                                   type="button"
                                   onClick={() => removeHighlight(index, hlIdx)}
-                                  className="text-red-500 hover:text-red-600 dark:text-red-400 font-bold px-1.5 text-base transition-colors shrink-0"
+                                  className="text-red-500 hover:text-red-600 dark:text-red-400 p-1 transition-colors shrink-0"
                                   title="Remove highlight"
                                 >
-                                  ✕
+                                  <X className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             ))}

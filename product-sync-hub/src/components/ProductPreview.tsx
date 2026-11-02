@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Product } from "@/lib/types";
-import { Eye, Phone, MapPin, Clock, Star, CheckCircle2, XCircle, Compass, Sparkles } from "lucide-react";
+import { Eye, Phone, MapPin, Clock, Star, CheckCircle2, XCircle, Compass, Sparkles, Hotel } from "lucide-react";
 import { normalizeProduct, cleanDisplayDescription } from "@/lib/packageParser";
 
 interface ProductPreviewProps {
@@ -78,7 +78,14 @@ export function ProductPreview({ product, trigger, open, onOpenChange }: Product
                 </h1>
                 {heroSubheading && (
                   <p className="text-gray-200 text-base sm:text-lg font-medium max-w-xl">
-                    {hotelName ? `🏨 ${hotelName}` : heroSubheading}
+                    {hotelName ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Hotel className="w-5 h-5 text-teal-300 shrink-0" />
+                        {hotelName}
+                      </span>
+                    ) : (
+                      heroSubheading
+                    )}
                   </p>
                 )}
                 {hotelName && heroSubheading && (
@@ -157,8 +164,9 @@ export function ProductPreview({ product, trigger, open, onOpenChange }: Product
                 </h3>
                 <div className="flex flex-wrap gap-2 pt-1">
                   {activities.map((act, i) => (
-                    <Badge key={i} variant="secondary" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700/80 px-3 py-1.5 text-xs font-semibold shadow-xs">
-                      🎯 {act}
+                    <Badge key={i} variant="secondary" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700/80 px-3 py-1.5 text-xs font-semibold shadow-xs inline-flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span>{act}</span>
                     </Badge>
                   ))}
                 </div>

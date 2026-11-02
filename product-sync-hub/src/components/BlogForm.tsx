@@ -37,7 +37,8 @@ import {
   CheckCircle2,
   Info,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Check
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -757,11 +758,11 @@ export function BlogForm({ onSubmit, initialData, trigger, open: controlledOpen,
                     </Label>
                     <span
                       className={cn(
-                        "text-[10px] font-mono font-medium",
+                        "text-[10px] font-mono font-medium flex items-center gap-1",
                         isTitleGood ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
                       )}
                     >
-                      {metaTitleLength} / 60 chars {isTitleGood && "✓ Ideal"}
+                      {metaTitleLength} / 60 chars {isTitleGood && <span className="inline-flex items-center gap-0.5"><Check className="w-3 h-3" /> Ideal</span>}
                     </span>
                   </div>
                   <Input
@@ -781,11 +782,11 @@ export function BlogForm({ onSubmit, initialData, trigger, open: controlledOpen,
                     </Label>
                     <span
                       className={cn(
-                        "text-[10px] font-mono font-medium",
+                        "text-[10px] font-mono font-medium flex items-center gap-1",
                         isDescGood ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
                       )}
                     >
-                      {metaDescLength} / 160 chars {isDescGood && "✓ Ideal"}
+                      {metaDescLength} / 160 chars {isDescGood && <span className="inline-flex items-center gap-0.5"><Check className="w-3 h-3" /> Ideal</span>}
                     </span>
                   </div>
                   <Textarea

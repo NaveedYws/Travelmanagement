@@ -122,6 +122,7 @@ export interface DetailedItineraryDay {
   description: string;
   images: string[];
   highlights?: string[];
+  meals?: string;
   /** @deprecated Use itinerary-level `hotels` instead */
   hotel?: string;
   /** @deprecated Use itinerary-level `transports` instead */

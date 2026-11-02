@@ -261,9 +261,9 @@ export function Dashboard() {
 
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10 w-full">
                 <div className="space-y-3 max-w-2xl">
-                  {/* Friendly Welcome Pill with Emoji */}
+                  {/* Friendly Welcome Pill */}
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50/90 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/60 shadow-2xs">
-                    <span>👋</span>
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                     <span>Welcome back, {userPrefix}</span>
                   </div>
 

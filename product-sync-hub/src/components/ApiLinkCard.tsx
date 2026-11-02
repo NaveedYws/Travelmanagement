@@ -202,11 +202,15 @@ export function ApiLinkCard() {
       <div className="pt-3.5 mt-2 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
         <div className="flex items-center gap-3 sm:gap-4 font-medium">
           <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-            <span className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 flex items-center justify-center text-[10px] font-bold">✓</span>
+            <span className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center shrink-0">
+              <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+            </span>
             <span>Real-time Sync</span>
           </span>
           <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-            <span className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 flex items-center justify-center text-[10px] font-bold">✓</span>
+            <span className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center shrink-0">
+              <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+            </span>
             <span>CORS Allowed</span>
           </span>
         </div>
