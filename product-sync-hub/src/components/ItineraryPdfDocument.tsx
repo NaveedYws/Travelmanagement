@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Lock, Sparkles, Check, X } from "lucide-react";
 import {
   DetailedItineraryDay,
@@ -55,18 +55,48 @@ interface ItineraryPdfDocumentProps {
 const PAGE =
   "w-[210mm] h-[297mm] bg-white overflow-hidden relative shrink-0 shadow-2xl mb-8 last:mb-0 select-none print:shadow-none print:mb-0 text-slate-800 font-sans leading-normal";
 
+export function resolveImageUrl(url?: string): string {
+  if (!url) return "";
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:") || trimmed.startsWith("blob:")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("//")) {
+    return `https:${trimmed}`;
+  }
+  if (trimmed.startsWith("holidaysbindas.com") || trimmed.includes(".com/") || trimmed.includes(".in/") || trimmed.includes(".org/")) {
+    return `https://${trimmed}`;
+  }
+
+  const rawApi = (import.meta.env.VITE_API_URL || "http://localhost:8000").trim();
+  const normApi = rawApi.startsWith("http://") || rawApi.startsWith("https://")
+    ? rawApi
+    : `https://${rawApi}`;
+  const base = normApi.replace(/\/+$/, "");
+  const clean = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return `${base}${clean}`;
+}
+
 export function getCompanyProfile(user?: User | null) {
   let localData: any = {};
+  let cachedLogoData = "";
   if (typeof window !== "undefined") {
     try {
       const raw = localStorage.getItem("agency_company_profile");
       if (raw) localData = JSON.parse(raw);
+      cachedLogoData = localStorage.getItem("agency_company_logo_data") || localData.company_logo_data || "";
     } catch {}
   }
 
+  const rawLogo = cachedLogoData || user?.company_logo || localData.company_logo || "";
+
   return {
     name: user?.company_name || localData.company_name || "",
-    logo: user?.company_logo || localData.company_logo || "",
+    logo: rawLogo,
     phone: user?.company_phone || localData.company_phone || "",
     email: user?.company_email || localData.company_email || user?.email || "",
     address: user?.company_address || localData.company_address || "",
@@ -76,8 +106,8 @@ export function getCompanyProfile(user?: User | null) {
     accountNumber: user?.bank_account_no || localData.bank_account_no || "",
     ifsc: user?.bank_ifsc || localData.bank_ifsc || "",
     upiId: user?.bank_upi_id || localData.bank_upi_id || "",
-    instagram: localData.company_instagram || "",
-    facebook: localData.company_facebook || "",
+    instagram: localData.company_instagram || localData.instagram || "",
+    facebook: localData.company_facebook || localData.facebook || "",
   };
 }
 
@@ -311,11 +341,11 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
             <CompanyLogo
               logo={company.logo}
               name={company.name}
-              className="h-20 max-w-[240px] w-auto object-contain mb-3 drop-shadow-xs"
+              className="h-20 max-w-[240px] w-auto object-contain mb-3 drop-shadow-xs shrink-0"
             />
 
             <h1 className="text-2xl font-black tracking-[0.2em] uppercase text-[#1e3a8a] mt-1 drop-shadow-xs">
-              {company.name || "EXCLUSIVE TRAVEL QUOTATION"}
+              {(company.name || "EXCLUSIVE TRAVEL QUOTATION").replace(/^\.+/, "").trim()}
             </h1>
           </div>
 
@@ -457,9 +487,9 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
                     <span className="text-slate-500 font-medium">Guest Name:</span>
                     <strong className="text-slate-900">{customerDisplayName}</strong>
                   </p>
-                  <p className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Package:</span>
-                    <span className="font-bold text-slate-800 truncate max-w-[130px]">
+                  <p className="flex justify-between items-baseline gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Package:</span>
+                    <span className="font-bold text-slate-800 text-right truncate">
                       {tripTitle || (destination ? `${destination} Tour` : "Confirmed Package")}
                     </span>
                   </p>
@@ -499,13 +529,14 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
             </div>
 
             {firstPageDays.length > 0 ? (
-              <div className="relative pl-7 space-y-2.5 before:absolute before:left-[11px] before:top-3.5 before:bottom-3.5 before:w-[2px] before:bg-sky-200">
-                {firstPageDays.map((day) => (
+              <div className="space-y-1">
+                {firstPageDays.map((day, idx) => (
                   <DayTimelineItem
                     key={day.day}
                     day={day}
                     totalDays={activeDays.length}
                     hotelMealPlan={activeHotels[0]?.mealPlan}
+                    isLast={idx === firstPageDays.length - 1}
                   />
                 ))}
               </div>
@@ -547,13 +578,14 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
               </h3>
             </div>
 
-            <div className="relative pl-7 space-y-2.5 before:absolute before:left-[11px] before:top-3.5 before:bottom-3.5 before:w-[2px] before:bg-sky-200">
-              {pageDays.map((day) => (
+            <div className="space-y-1">
+              {pageDays.map((day, idx) => (
                 <DayTimelineItem
                   key={day.day}
                   day={day}
                   totalDays={activeDays.length}
                   hotelMealPlan={activeHotels[0]?.mealPlan}
+                  isLast={idx === pageDays.length - 1}
                 />
               ))}
             </div>
@@ -1147,10 +1179,12 @@ function DayTimelineItem({
   day,
   totalDays,
   hotelMealPlan,
+  isLast,
 }: {
   day: DetailedItineraryDay;
   totalDays: number;
   hotelMealPlan?: string;
+  isLast?: boolean;
 }) {
   const photo = day.images?.[0];
   const cleanTitle = day.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, "").trim() || "Tour & Sightseeing";
@@ -1158,14 +1192,19 @@ function DayTimelineItem({
   const highlights = getDayHighlights(day);
 
   return (
-    <div className="relative flex items-start gap-3">
-      {/* Timeline Circle Node matching screenshot */}
-      <div className="absolute -left-7 top-2 w-5 h-5 rounded-full bg-[#0284c7] text-white flex items-center justify-center font-bold text-[10px] shadow-xs z-10 shrink-0 ring-2 ring-white">
-        {day.day}
+    <div className="flex items-stretch gap-2.5">
+      {/* Timeline Column: Circle Badge + Connecting Vertical Line */}
+      <div className="flex flex-col items-center shrink-0 w-5 pt-0.5">
+        <div className="w-5 h-5 rounded-full bg-[#0284c7] text-white flex items-center justify-center font-bold text-[10px] shadow-xs shrink-0 ring-2 ring-white">
+          {day.day}
+        </div>
+        {!isLast && (
+          <div className="w-[2px] flex-1 bg-sky-200 my-1" />
+        )}
       </div>
 
       {/* Day Card */}
-      <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/90 p-2.5 shadow-2xs space-y-1">
+      <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/90 p-2.5 shadow-2xs space-y-1 mb-1.5">
         {/* Top Header of Card: Day Title on left, Meals badge on right */}
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-0.5">
           <h4 className="text-xs font-bold text-slate-900 leading-snug">
@@ -1268,21 +1307,79 @@ function CompanyLogo({
   name?: string;
   className?: string;
 }) {
+  const [dataUrl, setDataUrl] = useState<string>("");
   const [loadError, setLoadError] = useState(false);
+
+  const cleanName = (name || "Agency").replace(/^\.+/, "").trim();
+
+  // Resolve logo to full URL or data URL
+  const resolvedUrl = useMemo(() => {
+    if (typeof window !== "undefined") {
+      const cached = localStorage.getItem("agency_company_logo_data");
+      if (cached && cached.startsWith("data:image")) return cached;
+    }
+    return resolveImageUrl(logo);
+  }, [logo]);
 
   useEffect(() => {
     setLoadError(false);
-  }, [logo]);
+    if (!resolvedUrl) {
+      setDataUrl("");
+      return;
+    }
 
-  const cleanName = (name || "Agency").replace(/^\./, "").trim();
+    if (resolvedUrl.startsWith("data:") || resolvedUrl.startsWith("blob:")) {
+      setDataUrl(resolvedUrl);
+      return;
+    }
 
-  if (!logo || loadError) {
-    const isSmall = className.includes("h-10") || className.includes("w-8") || className.includes("max-w-[120px]");
+    // Try converting remote image to base64 Data URL so html2canvas renders it 100% reliably in PDF
+    let active = true;
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const b64 = canvas.toDataURL("image/png");
+          if (active && b64 && b64.length > 50) {
+            setDataUrl(b64);
+            try {
+              localStorage.setItem("agency_company_logo_data", b64);
+            } catch {}
+            return;
+          }
+        }
+      } catch (e) {}
+      if (active) setDataUrl(resolvedUrl);
+    };
+    img.onerror = () => {
+      // If anonymous CORS fails, STILL use resolvedUrl for preview! Never hide logo!
+      if (active) setDataUrl(resolvedUrl);
+    };
+    img.src = resolvedUrl;
+
+    return () => {
+      active = false;
+    };
+  }, [resolvedUrl]);
+
+  if (!resolvedUrl || loadError) {
+    const isSmall =
+      className.includes("h-10") ||
+      className.includes("h-11") ||
+      className.includes("w-8") ||
+      className.includes("max-w-[120px]") ||
+      className.includes("max-w-[130px]");
     return (
       <div
         className={`${
           isSmall
-            ? "w-9 h-9 rounded-xl text-sm"
+            ? "w-10 h-10 rounded-xl text-sm"
             : "w-16 h-16 rounded-2xl text-2xl mb-3 shadow-md border-2 border-white/80"
         } bg-[#1e3a8a] text-white flex items-center justify-center font-black shrink-0`}
       >
@@ -1291,21 +1388,19 @@ function CompanyLogo({
     );
   }
 
-  let resolvedUrl = logo;
-  if (!resolvedUrl.startsWith("data:") && !resolvedUrl.startsWith("blob:") && !resolvedUrl.startsWith("http")) {
-    const rawApi = (import.meta.env.VITE_API_URL || "http://localhost:8000").trim();
-    const base = rawApi.replace(/\/+$/, "");
-    const clean = resolvedUrl.startsWith("/") ? resolvedUrl : `/${resolvedUrl}`;
-    resolvedUrl = `${base}${clean}`;
-  }
+  const effectiveSrc = dataUrl || resolvedUrl;
 
   return (
     <img
-      src={resolvedUrl}
+      src={effectiveSrc}
       alt={cleanName}
       className={className}
       onError={() => {
-        setLoadError(true);
+        if (effectiveSrc !== resolvedUrl && resolvedUrl) {
+          setDataUrl(resolvedUrl);
+        } else {
+          setLoadError(true);
+        }
       }}
     />
   );
@@ -1322,18 +1417,20 @@ function QuotationHeaderMini({
   quotationDate?: string;
   validUntilDate?: string;
 }) {
+  const cleanCompanyName = (company.name || "TRAVEL QUOTATION").replace(/^\.+/, "").trim();
+
   return (
-    <div className="flex items-start justify-between pb-2.5 border-b border-slate-200">
-      <div className="flex items-start gap-3">
+    <div className="flex items-center justify-between pb-2.5 border-b border-slate-200">
+      <div className="flex items-center gap-3.5">
         <CompanyLogo
           logo={company.logo}
-          name={company.name}
-          className="h-10 w-auto object-contain mt-0.5 max-w-[120px]"
+          name={cleanCompanyName}
+          className="h-11 w-auto object-contain max-w-[130px] shrink-0"
         />
 
         <div className="space-y-0.5 text-xs text-slate-500">
-          <h2 className="text-base font-black tracking-wide uppercase text-[#1e3a8a] leading-none">
-            {company.name || "TRAVEL QUOTATION"}
+          <h2 className="text-base font-black tracking-wide uppercase text-[#1e3a8a] leading-tight">
+            {cleanCompanyName}
           </h2>
           {company.website && <p className="text-[10.5px] text-slate-500 leading-tight">{company.website}</p>}
           {company.address && <p className="text-[10.5px] text-slate-500 leading-tight">{company.address}</p>}

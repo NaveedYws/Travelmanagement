@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { resolveImageUrl } from "./ItineraryPdfDocument";
 import {
   Building2,
   Upload,
@@ -80,6 +81,7 @@ export function CompanyProfileSettings() {
         const next = { ...prev, company_logo: dataUrl };
         try {
           localStorage.setItem("agency_company_profile", JSON.stringify(next));
+          localStorage.setItem("agency_company_logo_data", dataUrl);
           window.dispatchEvent(new Event("agency_profile_updated"));
         } catch {}
         return next;
@@ -161,7 +163,7 @@ export function CompanyProfileSettings() {
           <div className="relative w-20 h-20 rounded-2xl bg-white dark:bg-slate-950 border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
             {formData.company_logo ? (
               <img
-                src={formData.company_logo}
+                src={resolveImageUrl(formData.company_logo)}
                 alt="Company Logo"
                 className="w-full h-full object-contain p-1.5"
               />
@@ -202,6 +204,7 @@ export function CompanyProfileSettings() {
                     setFormData(next);
                     try {
                       localStorage.setItem("agency_company_profile", JSON.stringify(next));
+                      localStorage.removeItem("agency_company_logo_data");
                       window.dispatchEvent(new Event("agency_profile_updated"));
                     } catch {}
                   }}

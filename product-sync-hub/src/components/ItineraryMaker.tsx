@@ -917,19 +917,62 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     const toastId = toast.loading("Generating Quotation PDF…");
 
     try {
-      // 1. Fast image pre-check (racing decode with short timeout to prevent broken URLs from hanging)
+      // 1. Ensure all images are completely loaded & pre-convert remote images to Data URLs for 100% reliable PDF rendering
+      const cachedLogo = typeof window !== "undefined" ? localStorage.getItem("agency_company_logo_data") : null;
+      if (cachedLogo && cachedLogo.startsWith("data:image")) {
+        const logoImgs = pdfRef.current.querySelectorAll("img[alt='HB'], img[alt='Agency'], img[alt*='HOLIDAYS'], img[alt*='Holidays']");
+        logoImgs.forEach((img: any) => {
+          img.src = cachedLogo;
+        });
+      }
+
       const allImgs = Array.from(pdfRef.current.querySelectorAll("img"));
       await Promise.all(
-        allImgs.map((img) => {
-          if (img.complete && img.naturalHeight !== 0) return Promise.resolve(true);
-          return Promise.race([
-            img.decode ? img.decode().then(() => true).catch(() => true) : Promise.resolve(true),
-            new Promise((resolve) => {
+        allImgs.map(async (img) => {
+          if (!img.complete || img.naturalWidth === 0) {
+            await new Promise((resolve) => {
               img.onload = () => resolve(true);
               img.onerror = () => resolve(true);
-              setTimeout(() => resolve(true), 400);
-            }),
-          ]);
+              setTimeout(() => resolve(true), 2000);
+            });
+          }
+          if (img.complete && img.naturalWidth > 0 && !img.src.startsWith("data:") && !img.src.startsWith("blob:")) {
+            try {
+              // Attempt fetch to blob first (cleanest CORS Data URL creation)
+              const resp = await fetch(img.src, { mode: "cors" });
+              if (resp.ok) {
+                const blob = await resp.blob();
+                const reader = new FileReader();
+                await new Promise((res) => {
+                  reader.onloadend = () => {
+                    if (reader.result && typeof reader.result === "string" && reader.result.startsWith("data:image")) {
+                      img.src = reader.result;
+                    }
+                    res(true);
+                  };
+                  reader.onerror = () => res(true);
+                  reader.readAsDataURL(blob);
+                });
+              }
+            } catch (e) {
+              // Fallback canvas attempt
+              try {
+                const c = document.createElement("canvas");
+                c.width = img.naturalWidth;
+                c.height = img.naturalHeight;
+                const ctx = c.getContext("2d");
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                  const b64 = c.toDataURL("image/png");
+                  if (b64 && b64.length > 50) {
+                    img.src = b64;
+                  }
+                }
+              } catch (err) {
+                // Keep image as is if both attempts fail
+              }
+            }
+          }
         })
       );
 
@@ -2414,8 +2457,8 @@ Thank you for choosing ${user?.company_name || "us"}!`;
               {sectionsOpen.sightseeing && (
                 <div className="p-4 sm:p-6 border-t border-slate-100 space-y-4">
                   {/* Add Sightseeing Form */}
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <div className="space-y-1 sm:col-span-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className="space-y-1 sm:col-span-5">
                       <Label className="text-xs font-semibold text-slate-600">Activity / Ticket Name</Label>
                       <Input
                         placeholder="e.g. City Guided Tour / Museum Passes"
@@ -2424,7 +2467,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         className="h-9 bg-white text-xs"
                       />
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1 sm:col-span-3">
                       <Label className="text-xs font-semibold text-slate-600">Location / City</Label>
                       <Input
                         placeholder="City"
@@ -2433,7 +2476,18 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         className="h-9 bg-white text-xs"
                       />
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs font-semibold text-slate-600">Pax</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder="2"
+                        value={newSightseeing.pax || ""}
+                        onChange={(e) => setNewSightseeing({ ...newSightseeing, pax: parseInt(e.target.value) || 0 })}
+                        className="h-9 bg-white text-xs font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
                       <Label className="text-xs font-semibold text-slate-600">Total Price (₹)</Label>
                       <Input
                         type="number"
@@ -2443,14 +2497,14 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         className="h-9 bg-white text-xs font-semibold"
                       />
                     </div>
-                    <div className="sm:col-span-4">
+                    <div className="sm:col-span-12">
                       <Button
                         type="button"
                         size="sm"
                         onClick={() => {
                           if (!newSightseeing.title.trim()) return;
                           setSightseeings([...sightseeings, { ...newSightseeing, id: `s-${Date.now()}` }]);
-                          setNewSightseeing({ title: "", city: destination || "", pax: 2, price: 0, notes: "" });
+                          setNewSightseeing({ title: "", city: destination || "", pax: parseInt(adults) || 2, price: 0, notes: "" });
                           toast.success("Activity added");
                         }}
                         className="bg-teal-700 hover:bg-teal-800 text-white rounded-lg text-xs"
@@ -2469,7 +2523,9 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         <div key={idx} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50 text-xs">
                           <div>
                             <p className="font-bold text-slate-800">{s.title}</p>
-                            <p className="text-slate-400">{s.city} · {s.notes || "Included"}</p>
+                            <p className="text-slate-400">
+                              {[s.city, s.pax ? `${s.pax} Pax` : null, s.notes || "Included"].filter(Boolean).join(" · ")}
+                            </p>
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="font-bold text-teal-800">₹{(s.price || 0).toLocaleString("en-IN")}</span>
