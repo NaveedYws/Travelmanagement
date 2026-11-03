@@ -36,11 +36,15 @@ export function CompanyProfileSettings() {
     bank_account_name: "",
     bank_account_no: "",
     bank_ifsc: "",
-    bank_upi_id: ""
+    bank_upi_id: "",
+    bank_qr: "",
+    reviews_banner: ""
   });
 
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [isUploadingQr, setIsUploadingQr] = useState(false);
+  const [isUploadingReviews, setIsUploadingReviews] = useState(false);
 
   useEffect(() => {
     let localProfile: any = {};
@@ -60,7 +64,9 @@ export function CompanyProfileSettings() {
       bank_account_name: user?.bank_account_name || localProfile.bank_account_name || "",
       bank_account_no: user?.bank_account_no || localProfile.bank_account_no || "",
       bank_ifsc: user?.bank_ifsc || localProfile.bank_ifsc || "",
-      bank_upi_id: user?.bank_upi_id || localProfile.bank_upi_id || ""
+      bank_upi_id: user?.bank_upi_id || localProfile.bank_upi_id || "",
+      bank_qr: user?.bank_qr || localProfile.bank_qr || "",
+      reviews_banner: user?.reviews_banner || localProfile.reviews_banner || ""
     });
   }, [user]);
 
@@ -108,6 +114,98 @@ export function CompanyProfileSettings() {
       console.warn("Server upload skipped, using local data URL:", err.message);
     } finally {
       setIsUploadingLogo(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file (PNG, JPG, WEBP)");
+      return;
+    }
+
+    // Instant local base64 preview so it works 100% reliably
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setFormData((prev) => {
+        const next = { ...prev, bank_qr: dataUrl };
+        try {
+          localStorage.setItem("agency_company_profile", JSON.stringify(next));
+          localStorage.setItem("agency_bank_qr_data", dataUrl);
+          window.dispatchEvent(new Event("agency_profile_updated"));
+        } catch {}
+        return next;
+      });
+      toast.success("Payment QR code loaded successfully!");
+    };
+    reader.readAsDataURL(file);
+
+    try {
+      setIsUploadingQr(true);
+      const res = await api.upload(file);
+      if (res.publicUrl) {
+        setFormData((prev) => {
+          const next = { ...prev, bank_qr: res.publicUrl };
+          try {
+            localStorage.setItem("agency_company_profile", JSON.stringify(next));
+            window.dispatchEvent(new Event("agency_profile_updated"));
+          } catch {}
+          return next;
+        });
+      }
+    } catch (err: any) {
+      console.warn("Server upload skipped, using local data URL:", err.message);
+    } finally {
+      setIsUploadingQr(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleReviewsBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please upload an image file (PNG, JPG, WEBP)");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setFormData((prev) => {
+        const next = { ...prev, reviews_banner: dataUrl };
+        try {
+          localStorage.setItem("agency_company_profile", JSON.stringify(next));
+          localStorage.setItem("agency_reviews_banner_data", dataUrl);
+          window.dispatchEvent(new Event("agency_profile_updated"));
+        } catch {}
+        return next;
+      });
+      toast.success("Reviews banner updated successfully!");
+    };
+    reader.readAsDataURL(file);
+
+    try {
+      setIsUploadingReviews(true);
+      const res = await api.upload(file);
+      if (res.publicUrl) {
+        setFormData((prev) => {
+          const next = { ...prev, reviews_banner: res.publicUrl };
+          try {
+            localStorage.setItem("agency_company_profile", JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      }
+    } catch (err: any) {
+      console.warn("Server upload skipped, using local data URL:", err.message);
+    } finally {
+      setIsUploadingReviews(false);
       e.target.value = "";
     }
   };
@@ -417,6 +515,165 @@ export function CompanyProfileSettings() {
                 value={formData.bank_upi_id}
                 onChange={(e) => setFormData({ ...formData, bank_upi_id: e.target.value })}
               />
+            </div>
+          </div>
+
+          {/* Payment QR Code Upload */}
+          <div className="sm:col-span-2 pt-2 border-t border-slate-200/70 dark:border-slate-800/80 space-y-2">
+            <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <QrCode className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                Upload Official Payment QR Code (PhonePe / GPay / Paytm / Bank QR)
+              </span>
+              <span className="text-[10px] text-slate-400 font-normal">
+                Shows directly on Quotation PDFs
+              </span>
+            </Label>
+
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-white dark:bg-slate-950 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
+              <div className="relative w-20 h-20 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                {formData.bank_qr ? (
+                  <img
+                    src={resolveImageUrl(formData.bank_qr)}
+                    alt="Payment QR Code"
+                    className="w-full h-full object-contain p-1"
+                  />
+                ) : (
+                  <div className="text-center p-1.5 text-slate-400">
+                    <QrCode className="w-6 h-6 mx-auto mb-1 opacity-60 text-emerald-600" />
+                    <span className="text-[8.5px] font-semibold block leading-tight">No QR Code</span>
+                  </div>
+                )}
+                {isUploadingQr && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleQrUpload}
+                      disabled={isUploadingQr}
+                      className="hidden"
+                    />
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      {formData.bank_qr ? "Change QR Code" : "Upload QR Code"}
+                    </span>
+                  </label>
+
+                  {formData.bank_qr && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = { ...formData, bank_qr: "" };
+                        setFormData(next);
+                        try {
+                          localStorage.setItem("agency_company_profile", JSON.stringify(next));
+                          localStorage.removeItem("agency_bank_qr_data");
+                          window.dispatchEvent(new Event("agency_profile_updated"));
+                        } catch {}
+                      }}
+                      className="text-xs text-red-500 hover:text-red-700 font-medium cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+
+                <div className="pt-0.5">
+                  <Input
+                    placeholder="Or paste direct QR Code Image URL (https://...)"
+                    className="text-xs rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 h-8 font-mono"
+                    value={formData.bank_qr?.startsWith("data:") ? "" : formData.bank_qr || ""}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      const next = { ...formData, bank_qr: val };
+                      setFormData(next);
+                      try {
+                        localStorage.setItem("agency_company_profile", JSON.stringify(next));
+                        window.dispatchEvent(new Event("agency_profile_updated"));
+                      } catch {}
+                    }}
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Upload screenshot or image of your UPI / Merchant QR code. Clients can scan this directly from the quotation PDF.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Google Reviews / Feedback Banner Upload */}
+          <div className="sm:col-span-2 pt-2 border-t border-slate-200/70 dark:border-slate-800/80 space-y-2">
+            <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                Google Reviews &amp; Client Feedback Widget (Printed after payment on final page)
+              </span>
+              <span className="text-[10px] text-slate-400 font-normal">
+                Shows on last page of Quotation PDFs
+              </span>
+            </Label>
+
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-white dark:bg-slate-950 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
+              <div className="relative w-40 h-16 rounded-xl bg-slate-50 dark:bg-slate-900 border-2 border-dashed border-slate-300 dark:border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                <img
+                  src={resolveImageUrl(formData.reviews_banner || "/google-reviews-banner.png")}
+                  alt="Reviews Banner Preview"
+                  className="w-full h-full object-contain p-1"
+                />
+                {isUploadingReviews && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleReviewsBannerUpload}
+                      disabled={isUploadingReviews}
+                      className="hidden"
+                    />
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      {formData.reviews_banner ? "Change Reviews Banner" : "Upload Custom Reviews Banner"}
+                    </span>
+                  </label>
+
+                  {formData.reviews_banner && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = { ...formData, reviews_banner: "" };
+                        setFormData(next);
+                        try {
+                          localStorage.setItem("agency_company_profile", JSON.stringify(next));
+                          localStorage.removeItem("agency_reviews_banner_data");
+                          window.dispatchEvent(new Event("agency_profile_updated"));
+                        } catch {}
+                      }}
+                      className="text-xs text-red-500 hover:text-red-700 font-medium cursor-pointer"
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Default Google reviews banner with review QR code is automatically included on the last page. You can customize it by uploading your own banner anytime.
+                </p>
+              </div>
             </div>
           </div>
         </div>

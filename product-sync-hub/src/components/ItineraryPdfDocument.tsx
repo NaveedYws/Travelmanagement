@@ -26,6 +26,7 @@ export interface ItineraryPdfData {
   theme: string;
   colorTheme?: string;
   templateStyle?: "editorial" | "executive" | "modern";
+  includeCoverPage?: boolean;
   subTotal?: number;
   discountAmount?: number;
   discountPercent?: number;
@@ -53,7 +54,7 @@ interface ItineraryPdfDocumentProps {
 }
 
 const PAGE =
-  "w-[210mm] h-[297mm] bg-white overflow-hidden relative shrink-0 shadow-2xl mb-8 last:mb-0 select-none print:shadow-none print:mb-0 text-slate-800 font-sans leading-normal";
+  "w-[210mm] min-w-[210mm] max-w-[210mm] h-[297mm] min-h-[297mm] max-h-[297mm] box-border bg-white overflow-hidden relative shrink-0 shadow-2xl mb-8 last:mb-0 select-none print:shadow-none print:mb-0 text-slate-800 font-sans leading-normal";
 
 export function resolveImageUrl(url?: string): string {
   if (!url) return "";
@@ -84,15 +85,21 @@ export function resolveImageUrl(url?: string): string {
 export function getCompanyProfile(user?: User | null) {
   let localData: any = {};
   let cachedLogoData = "";
+  let cachedQrData = "";
+  let cachedReviewsData = "";
   if (typeof window !== "undefined") {
     try {
       const raw = localStorage.getItem("agency_company_profile");
       if (raw) localData = JSON.parse(raw);
       cachedLogoData = localStorage.getItem("agency_company_logo_data") || localData.company_logo_data || "";
+      cachedQrData = localStorage.getItem("agency_bank_qr_data") || localData.bank_qr_data || "";
+      cachedReviewsData = localStorage.getItem("agency_reviews_banner_data") || localData.reviews_banner_data || "";
     } catch {}
   }
 
   const rawLogo = cachedLogoData || user?.company_logo || localData.company_logo || "";
+  const rawQr = cachedQrData || user?.bank_qr || localData.bank_qr || "";
+  const rawReviews = cachedReviewsData || user?.reviews_banner || localData.reviews_banner || "/google-reviews-banner.png";
 
   return {
     name: user?.company_name || localData.company_name || "",
@@ -106,6 +113,8 @@ export function getCompanyProfile(user?: User | null) {
     accountNumber: user?.bank_account_no || localData.bank_account_no || "",
     ifsc: user?.bank_ifsc || localData.bank_ifsc || "",
     upiId: user?.bank_upi_id || localData.bank_upi_id || "",
+    qrCode: rawQr,
+    reviewsBanner: rawReviews,
     instagram: localData.company_instagram || localData.instagram || "",
     facebook: localData.company_facebook || localData.facebook || "",
   };
@@ -131,17 +140,41 @@ const DEFAULT_CANCELLATION_POLICY = [
 ];
 
 // Parse Day Itinerary into structured point-wise bullet items
-function parseDayPoints(description?: string, activities?: string): string[] {
+function parseDayPoints(description?: string, activities?: string, dayTitle?: string): string[] {
   const points: string[] = [];
+
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/^(day\s*\d+\s*[:\-–—]*\s*)+/i, "")
+      .replace(/^[:\-–—\s]+/, "")
+      .replace(/[:\-–—\s]+$/, "")
+      .trim();
+
+  const normalizedTitle = dayTitle ? normalize(dayTitle) : "";
+
+  const addLine = (rawLine: string) => {
+    const clean = rawLine
+      .replace(/^([•\-\*–—\u2022\u2023\u25E6\u2043\u2219]+|\d+[\.\)\-:]+)\s*/, "")
+      .replace(/^[:\-–—\s]+/, "")
+      .trim();
+    if (!clean) return;
+
+    // Filter out if this line simply repeats the day title
+    if (normalizedTitle && normalize(clean) === normalizedTitle) {
+      return;
+    }
+
+    if (!points.includes(clean)) {
+      points.push(clean);
+    }
+  };
 
   // Parse activities if present and distinct
   if (activities && activities.trim()) {
     const actLines = activities.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
     for (const line of actLines) {
-      const clean = line.replace(/^([•\-\*–—\u2022\u2023\u25E6\u2043\u2219]+|\d+[\.\)\-:]+)\s*/, "").trim();
-      if (clean && !points.includes(clean)) {
-        points.push(clean);
-      }
+      addLine(line);
     }
   }
 
@@ -149,10 +182,7 @@ function parseDayPoints(description?: string, activities?: string): string[] {
   if (description && description.trim()) {
     const descLines = description.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
     for (const line of descLines) {
-      const clean = line.replace(/^([•\-\*–—\u2022\u2023\u25E6\u2043\u2219]+|\d+[\.\)\-:]+)\s*/, "").trim();
-      if (clean && !points.includes(clean)) {
-        points.push(clean);
-      }
+      addLine(line);
     }
   }
 
@@ -163,7 +193,7 @@ function parseDayPoints(description?: string, activities?: string): string[] {
       .map((s) => s.trim())
       .filter(Boolean);
     if (sentences.length > 1) {
-      return sentences;
+      return sentences.filter((s) => !normalizedTitle || normalize(s) !== normalizedTitle);
     }
   }
 
@@ -172,45 +202,321 @@ function parseDayPoints(description?: string, activities?: string): string[] {
     : ["Scheduled sightseeing, transfers, and leisure activities as per tour program."];
 }
 
-// Smart chunking for days to avoid lonely 1-day pages and massive empty spaces
-function chunkDays(days: DetailedItineraryDay[]): {
-  firstPageDays: DetailedItineraryDay[];
-  otherPages: DetailedItineraryDay[][];
-} {
-  const n = days.length;
-  if (n === 0) {
-    return { firstPageDays: [], otherPages: [] };
-  }
-  // Up to 4 days: all fit comfortably on Page 2 alongside executive summary & pricing!
-  // This ensures 1, 2, 3, or 4-day itineraries flow continuously without massive whitespace voids
-  if (n <= 4) {
-    return { firstPageDays: days, otherPages: [] };
-  }
+export interface ContentPagePlan {
+  days?: {
+    list: DetailedItineraryDay[];
+    partTitle: string;
+    compact: boolean;
+  };
+  hotels?: {
+    list: ItineraryHotel[];
+    compact: boolean;
+  };
+  transports?: {
+    list: ItineraryTransport[];
+  };
+  activities?: {
+    list: ItinerarySightseeing[];
+  };
+  inclusionsExclusions?: {
+    inclusions: string[];
+    exclusions: string[];
+  };
+  policies?: {
+    clientNotes?: string;
+    showAccreditations?: boolean;
+  };
+  payment?: {
+    showMilestones?: boolean;
+  };
+}
 
-  // 5 or more days:
-  // First 3 days on Page 2 alongside executive summary
-  const firstPageDays = days.slice(0, 3);
-  const rest = days.slice(3);
-  const otherPages: DetailedItineraryDay[][] = [];
+// Smart page planner that packs days, hotels, vehicles, policies, and payment
+// without unnecessary empty spaces or orphaned items on pages
+function estimateDayHeight(day: DetailedItineraryDay, compact: boolean): number {
+  const points = parseDayPoints(day.description, day.activities, day.title);
+  const bulletCount = points.length;
+  const contentH = Math.max(bulletCount * (compact ? 4.0 : 4.8), compact ? 26 : 30);
+  return 12 + contentH + (day.highlights && day.highlights.length > 0 ? 5 : 0);
+}
 
-  // Subsequent pages fit 3 to 4 days comfortably without empty space
-  let i = 0;
-  while (i < rest.length) {
-    const remaining = rest.length - i;
-    if (remaining <= 4) {
-      otherPages.push(rest.slice(i));
-      break;
-    } else if (remaining === 5) {
-      // Split 5 into 3 and 2 so neither page has an orphaned single day
-      otherPages.push(rest.slice(i, i + 3));
-      i += 3;
-    } else {
-      otherPages.push(rest.slice(i, i + 4));
-      i += 4;
+export function planContentPages({
+  activeDays = [],
+  activeHotels = [],
+  activeTransports = [],
+  activeActivities = [],
+  effectiveInclusions = [],
+  effectiveExclusions = [],
+  hasPaymentDetails = false,
+  clientNotes = "",
+}: {
+  activeDays: DetailedItineraryDay[];
+  activeHotels: ItineraryHotel[];
+  activeTransports: ItineraryTransport[];
+  activeActivities: ItinerarySightseeing[];
+  effectiveInclusions: string[];
+  effectiveExclusions: string[];
+  hasPaymentDetails: boolean;
+  clientNotes: string;
+}): ContentPagePlan[] {
+  // A4 page is 297mm. User wants only ~10% empty space at the bottom (~28mm buffer above footer).
+  const MAX_PAGE_HEIGHT = 268; // mm of usable vertical space per page (leaves only ~10% bottom space)
+  const MIN_SPACE_THRESHOLD = 28; // ~10% of page height. Continue sections on same page unless less than 10% remains!
+  const pages: ContentPagePlan[] = [];
+
+  const getHotelsHeight = (count: number, compact: boolean) =>
+    count > 0 ? 8 + count * (compact ? 28 : 34) : 0;
+
+  const transportsHeight =
+    activeTransports.length > 0 ? 14 + activeTransports.length * 6.5 : 0;
+
+  const activitiesHeight =
+    activeActivities.length > 0 ? 14 + activeActivities.length * 6.5 : 0;
+
+  const incCount = Math.max(effectiveInclusions.length, effectiveExclusions.length);
+  const incExcHeight =
+    effectiveInclusions.length > 0 || effectiveExclusions.length > 0
+      ? 16 + Math.min(incCount, 8) * 3.5
+      : 0;
+
+  const getPoliciesHeight = (showAccred: boolean) =>
+    82 + (clientNotes ? 18 : 0) + (showAccred ? 24 : 0);
+  const paymentHeight = hasPaymentDetails ? 96 : 0;
+
+  let unplacedDays = [...activeDays];
+  let unplacedHotels = [...activeHotels];
+  let transportsPlaced = activeTransports.length === 0;
+  let activitiesPlaced = activeActivities.length === 0;
+  let incExcPlaced = effectiveInclusions.length === 0 && effectiveExclusions.length === 0;
+  let policiesPlaced = false;
+  let paymentPlaced = !hasPaymentDetails;
+
+  let dayPartIndex = 1;
+  const willNeedMultipleDayParts = unplacedDays.length > 5;
+
+  while (
+    unplacedDays.length > 0 ||
+    unplacedHotels.length > 0 ||
+    !transportsPlaced ||
+    !activitiesPlaced ||
+    !incExcPlaced ||
+    !policiesPlaced ||
+    !paymentPlaced
+  ) {
+    const page: ContentPagePlan = {};
+    let spaceLeft = MAX_PAGE_HEIGHT;
+
+    // STEP 1: PLACE ITINERARY DAYS (Pack as many days as fit down to the 10% bottom margin!)
+    if (unplacedDays.length > 0) {
+      let daysToTake = unplacedDays.length;
+      let isCompact = daysToTake >= 3 || unplacedDays.length >= 4;
+      let dHeight =
+        10 +
+        unplacedDays
+          .slice(0, daysToTake)
+          .reduce((sum, d) => sum + estimateDayHeight(d, isCompact), 0);
+
+      while (daysToTake > 1 && dHeight > spaceLeft) {
+        daysToTake--;
+        isCompact = daysToTake >= 3 || unplacedDays.length >= 4;
+        dHeight =
+          10 +
+          unplacedDays
+            .slice(0, daysToTake)
+            .reduce((sum, d) => sum + estimateDayHeight(d, isCompact), 0);
+      }
+
+      const taken = unplacedDays.splice(0, daysToTake);
+      const partTitle = willNeedMultipleDayParts
+        ? `DETAILED DAY-WISE TOUR ITINERARY (PART ${dayPartIndex++})`
+        : "DETAILED DAY-WISE TOUR ITINERARY";
+
+      page.days = {
+        list: taken,
+        partTitle,
+        compact: isCompact,
+      };
+      spaceLeft -= dHeight;
+
+      // If more itinerary days still remain for subsequent pages, finish this page cleanly.
+      // (Subsequent days will start at the top of the next page).
+      if (unplacedDays.length > 0) {
+        pages.push(page);
+        continue;
+      }
     }
+
+    // 10% REMAINING SPACE RULE: If less than ~10% space remains, move to the next page
+    if (spaceLeft < MIN_SPACE_THRESHOLD) {
+      pages.push(page);
+      continue;
+    }
+
+    // STEP 2: PLACE HOTELS (Continue on same page if space permits!)
+    if (unplacedHotels.length > 0) {
+      const isCompactHotel = spaceLeft < 130 || unplacedHotels.length > 2;
+      const hHeight = getHotelsHeight(unplacedHotels.length, isCompactHotel);
+
+      if (hHeight <= spaceLeft - 6) {
+        page.hotels = {
+          list: unplacedHotels,
+          compact: isCompactHotel,
+        };
+        spaceLeft -= hHeight;
+        unplacedHotels = [];
+      } else if (page.days) {
+        // If this page already has days and hotels don't all fit:
+        // Try fitting as many hotels as possible, or if none fit move to next page
+        let countThatFit = 0;
+        for (let i = unplacedHotels.length - 1; i >= 1; i--) {
+          if (getHotelsHeight(i, true) <= spaceLeft - 6) {
+            countThatFit = i;
+            break;
+          }
+        }
+        if (countThatFit > 0) {
+          const taken = unplacedHotels.splice(0, countThatFit);
+          page.hotels = {
+            list: taken,
+            compact: true,
+          };
+          spaceLeft -= getHotelsHeight(countThatFit, true);
+        } else {
+          pages.push(page);
+          continue;
+        }
+      } else {
+        // Fresh page for hotels: take as many as fit
+        let countThatFit = 0;
+        for (let i = unplacedHotels.length; i >= 1; i--) {
+          if (getHotelsHeight(i, true) <= spaceLeft - 6) {
+            countThatFit = i;
+            break;
+          }
+        }
+        if (countThatFit > 0) {
+          const taken = unplacedHotels.splice(0, countThatFit);
+          page.hotels = {
+            list: taken,
+            compact: true,
+          };
+          spaceLeft -= getHotelsHeight(countThatFit, true);
+        }
+      }
+    }
+
+    // 10% REMAINING SPACE RULE: If less than ~10% space remains, move to the next page
+    if (spaceLeft < MIN_SPACE_THRESHOLD) {
+      pages.push(page);
+      continue;
+    }
+
+    // STEP 3: PLACE TRANSPORTS & ACTIVITIES
+    if (!transportsPlaced && activeTransports.length > 0) {
+      if (transportsHeight <= spaceLeft - 6) {
+        page.transports = { list: activeTransports };
+        spaceLeft -= transportsHeight;
+        transportsPlaced = true;
+      }
+    }
+
+    if (!activitiesPlaced && activeActivities.length > 0) {
+      if (activitiesHeight <= spaceLeft - 6) {
+        page.activities = { list: activeActivities };
+        spaceLeft -= activitiesHeight;
+        activitiesPlaced = true;
+      }
+    }
+
+    // STEP 4: PLACE INCLUSIONS / EXCLUSIONS
+    if (!incExcPlaced && incExcHeight > 0) {
+      if (incExcHeight <= spaceLeft - 6) {
+        page.inclusionsExclusions = {
+          inclusions: effectiveInclusions,
+          exclusions: effectiveExclusions,
+        };
+        spaceLeft -= incExcHeight;
+        incExcPlaced = true;
+      } else if (page.days || page.hotels) {
+        pages.push(page);
+        continue;
+      }
+    } else {
+      incExcPlaced = true;
+    }
+
+    // STEP 5: PLACE POLICIES & PAYMENT (COMMERCIAL SECTION)
+    if (unplacedHotels.length === 0) {
+      const showAccred =
+        !hasPaymentDetails || spaceLeft >= getPoliciesHeight(true) + paymentHeight;
+      const polHeight = getPoliciesHeight(showAccred);
+
+      if (!policiesPlaced) {
+        if (polHeight <= spaceLeft - 6) {
+          page.policies = {
+            clientNotes,
+            showAccreditations: showAccred,
+          };
+          spaceLeft -= polHeight;
+          policiesPlaced = true;
+        } else if (page.days || page.hotels || page.inclusionsExclusions) {
+          pages.push(page);
+          continue;
+        }
+      }
+
+      if (policiesPlaced && !paymentPlaced && hasPaymentDetails) {
+        if (paymentHeight <= spaceLeft - 6) {
+          page.payment = {
+            showMilestones: spaceLeft >= paymentHeight + 8,
+          };
+          spaceLeft -= paymentHeight;
+          paymentPlaced = true;
+        } else if (page.days || page.hotels || page.policies) {
+          pages.push(page);
+          continue;
+        }
+      }
+    }
+
+    // Safeguard: Ensure at least one section is consumed per page to avoid infinite loop
+    if (Object.keys(page).length === 0) {
+      if (unplacedHotels.length > 0) {
+        page.hotels = { list: unplacedHotels, compact: true };
+        unplacedHotels = [];
+      } else if (!transportsPlaced && activeTransports.length > 0) {
+        page.transports = { list: activeTransports };
+        transportsPlaced = true;
+      } else if (!activitiesPlaced && activeActivities.length > 0) {
+        page.activities = { list: activeActivities };
+        activitiesPlaced = true;
+      } else if (!incExcPlaced) {
+        page.inclusionsExclusions = {
+          inclusions: effectiveInclusions,
+          exclusions: effectiveExclusions,
+        };
+        incExcPlaced = true;
+      } else if (!policiesPlaced) {
+        page.policies = { clientNotes, showAccreditations: !hasPaymentDetails };
+        policiesPlaced = true;
+      } else if (!paymentPlaced) {
+        page.payment = { showMilestones: true };
+        paymentPlaced = true;
+      }
+    }
+
+    pages.push(page);
+    if (pages.length > 10) break;
   }
 
-  return { firstPageDays, otherPages };
+  // Ensure at least 1 content page
+  if (pages.length === 0) {
+    pages.push({
+      policies: { clientNotes, showAccreditations: true },
+    });
+  }
+
+  return pages;
 }
 
 export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) {
@@ -244,6 +550,7 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
     duration = "Dates to be confirmed",
     adults = "2",
     children = "0",
+    includeCoverPage = false,
     finalRate = "0",
     discountAmount = 0,
     discountPercent = 10,
@@ -279,34 +586,42 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
   const numFinalPrice = parseFloat(finalRate || "0");
   const formattedPrice = numFinalPrice > 0 ? numFinalPrice.toLocaleString("en-IN") : "0";
 
-  // Chunk days intelligently
-  const { firstPageDays, otherPages: dayPages } = chunkDays(activeDays);
-
-  const hasAccommodationsOrFleet =
-    activeHotels.length > 0 || activeTransports.length > 0 || activeActivities.length > 0;
-
   const hasPaymentDetails = Boolean(
-    company.accountNumber || company.upiId || company.accountHolder || company.ifsc
+    company.accountNumber || company.upiId || company.accountHolder || company.ifsc || company.qrCode
   );
 
   // ONLY show guest picture page if user actually provided guest photos
   const hasActualGuestPhotos = Boolean(guestPhotos && guestPhotos.length > 0);
 
-  // Total pages calculation
-  let totalPages = 1; // Page 1: Cover
-  totalPages += 1; // Page 2: Summary + first day(s)
-  totalPages += dayPages.length; // Remaining day pages
-  if (hasAccommodationsOrFleet) totalPages += 1; // Accommodations & Transport
-  totalPages += 1; // Inclusions, Exclusions, Cancellation & Privacy Policy (Always guaranteed)
-  if (hasPaymentDetails) totalPages += 1; // Payment & Bank info
-  if (hasActualGuestPhotos) totalPages += 1; // Actual guest pictures
+  // Dynamic intelligent content pages (auto-merges sections when they fit without whitespace voids)
+  const contentPages = useMemo(
+    () =>
+      planContentPages({
+        activeDays,
+        activeHotels,
+        activeTransports,
+        activeActivities,
+        effectiveInclusions,
+        effectiveExclusions,
+        hasPaymentDetails,
+        clientNotes,
+      }),
+    [
+      activeDays,
+      activeHotels,
+      activeTransports,
+      activeActivities,
+      effectiveInclusions,
+      effectiveExclusions,
+      hasPaymentDetails,
+      clientNotes,
+    ]
+  );
 
-  let currentPage = 1;
+  // Total pages: Page 1 (Cover) + Content Pages + Guest Photos (if any)
+  const totalPages = 1 + contentPages.length + (hasActualGuestPhotos ? 1 : 0);
 
-  const coverBg =
-    heroImage ||
-    activeDays.find((d) => d.images && d.images[0]?.trim())?.images?.[0] ||
-    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1600";
+  const cleanCompanyName = (company.name || "HOLIDAYS BINDAS").replace(/^\.+/, "").trim();
 
   // Dynamic customer display name (properly capitalized, e.g. "deepak" -> "Deepak", "aarif" -> "Aarif")
   const rawClientName = (clientName || "Valued Traveler").trim();
@@ -320,782 +635,258 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
   return (
     <div className="font-sans text-slate-800 antialiased selection:bg-teal-500 selection:text-white bg-slate-100 flex flex-col items-center">
       {/* ========================================================================= */}
-      {/* PAGE 1: COVER PAGE (With Highly Visible Scenery & Welcome Briefing)       */}
+      {/* PAGE 1: COVER PAGE WITH COMPANY & CUSTOMER DETAILS (MATCHING SCREENSHOT)  */}
       {/* ========================================================================= */}
-      <div data-pdf-page className={PAGE}>
-        {/* Scenic Travel Background Image Layer (Original Luminous Style Restored) */}
-        <div className="absolute inset-0 z-0 overflow-hidden">
-          <img
-            src={coverBg}
-            alt="Cover Travel Scenery"
-            className="w-full h-full object-cover scale-105"
-          />
-          {/* Luminous frosted overlay to ensure scenery shines through while text is 100% readable */}
-          <div className="absolute inset-0 bg-white/80" />
-          <div className="absolute inset-0 bg-gradient-to-b from-white/95 via-white/70 to-white/95" />
-        </div>
-
-        <div className="h-full flex flex-col justify-between pt-14 pb-20 px-12 text-center relative z-10">
-          {/* Top Logo & Agency Brand Name from User Settings */}
-          <div className="flex flex-col items-center">
+      <div data-pdf-page className={`${PAGE} flex flex-col justify-between pt-5 px-7 pb-0 text-slate-800`}>
+        {/* --- 1. TOP BRAND HEADER --- */}
+        <div className="flex flex-col items-center text-center">
+          {company.logo ? (
             <CompanyLogo
               logo={company.logo}
-              name={company.name}
-              className="h-20 max-w-[240px] w-auto object-contain mb-3 drop-shadow-xs shrink-0"
+              name={cleanCompanyName}
+              className="h-20 sm:h-24 max-h-24 w-auto max-w-[380px] object-contain drop-shadow-xs shrink-0"
             />
-
-            <h1 className="text-2xl font-black tracking-[0.2em] uppercase text-[#1e3a8a] mt-1 drop-shadow-xs">
-              {(company.name || "EXCLUSIVE TRAVEL QUOTATION").replace(/^\.+/, "").trim()}
+          ) : (
+            <h1 className="text-2xl font-black tracking-[0.2em] uppercase text-[#0f2942] mt-1">
+              {cleanCompanyName}
             </h1>
-          </div>
+          )}
 
-          {/* Quotation Info & Client Name Showcase Card with Dynamic Customer Name & Welcome Briefing */}
-          <div className="my-auto py-5 relative z-10 max-w-lg mx-auto w-full">
-            <div className="bg-white/85 backdrop-blur-md rounded-3xl p-6 sm:p-8 border border-white/90 shadow-xl text-center space-y-2">
-              <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
-                QUOTATION
-              </p>
-              <p className="text-xs text-slate-600 font-medium">
-                No: {quotationRef} &nbsp;|&nbsp; Date: {quotationDate} &nbsp;|&nbsp; Valid: {validUntilDate}
-              </p>
-
-              <div className="pt-5 border-t border-slate-200/70 mt-3 space-y-1">
-                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-400">
-                  PREPARED EXCLUSIVELY FOR
-                </p>
-                <h2 className="text-3xl font-black text-[#0f2942] tracking-tight mt-0.5">
-                  {customerDisplayName}
-                </h2>
-                {tripTitle && (
-                  <p className="text-sm font-semibold text-teal-700 mt-1">
-                    {tripTitle}
-                  </p>
-                )}
-                {destination && (
-                  <p className="text-xs text-slate-500 font-medium">
-                    {destination} · {duration}
-                  </p>
-                )}
-              </div>
-
-              {/* Welcome Briefing with Dynamic Customer Name */}
-              <div className="pt-3 border-t border-slate-200/70 mt-2 text-xs text-slate-600 leading-relaxed text-center">
-                <p>
-                  Dear <strong className="text-slate-800 font-bold">{customerDisplayName}</strong>, welcome to your bespoke travel proposal! We are delighted to present this customized holiday itinerary crafted exclusively for your upcoming journey.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Accreditations & Badges */}
-          <div className="space-y-4">
-            <p className="text-[9px] uppercase tracking-wider text-slate-600 font-semibold">
-              MOT REGISTERED &nbsp;|&nbsp; IATA ACCREDITED &nbsp;|&nbsp; IATO MEMBER &nbsp;|&nbsp; TAAI MEMBER &nbsp;|&nbsp; ADTOI MEMBER &nbsp;|&nbsp; ATOAI MEMBER
-            </p>
-            <div className="flex items-center justify-center gap-7 pt-1 flex-wrap">
-              <MotBadge />
-              <IataBadge />
-              <IatoBadge />
-              <TaaiBadge />
-              <AdtoiBadge />
-              <AtoaiBadge />
-            </div>
-
-            {/* Contact Details from User Settings */}
-            <div className="pt-6 text-xs text-slate-600 space-y-1 font-medium">
-              <p>
-                {[company.website, company.phone, company.email].filter(Boolean).join(" · ") ||
-                  "Verified Travel Specialist"}
-              </p>
-              {company.address && <p>{company.address}</p>}
-            </div>
+          {/* Airplane Divider */}
+          <div className="flex items-center justify-center gap-3 w-4/5 max-w-md mx-auto my-2">
+            <div className="h-[1px] flex-1 bg-slate-300" />
+            <span className="text-amber-500 text-base leading-none">✈</span>
+            <div className="h-[1px] flex-1 bg-slate-300" />
           </div>
         </div>
 
-        <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
-      </div>
+        {/* --- 2. QUOTATION INFO & PREPARED EXCLUSIVELY FOR CARD --- */}
+        <div className="bg-[#eff6ff]/80 border border-blue-200/80 rounded-2xl px-5 py-3 text-center space-y-1.5 shadow-2xs">
+          <p className="text-xs font-black uppercase text-[#0f2942] leading-5">
+            QUOTATION
+          </p>
+          <p className="text-[12px] text-slate-600 font-medium leading-5 break-words">
+            No: {quotationRef} &nbsp;|&nbsp; Date: {quotationDate} &nbsp;|&nbsp; Valid: {validUntilDate}
+          </p>
 
-      {/* ========================================================================= */}
-      {/* PAGE 2: EXECUTIVE SUMMARY, INVESTMENT BREAKDOWN & ITINERARY START         */}
-      {/* ========================================================================= */}
-      <div data-pdf-page className={PAGE}>
-        <div className="p-6 pb-12 space-y-2.5">
-          <QuotationHeaderMini
-            company={company}
-            quotationRef={quotationRef}
-            quotationDate={quotationDate}
-            validUntilDate={validUntilDate}
-          />
-
-          {/* Section Banner */}
-          <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-              EXECUTIVE TRIP SUMMARY &amp; INVESTMENT
-            </h3>
-            <span className="text-[10px] text-slate-400 font-medium">All Prices in INR (₹)</span>
+          <div className="pt-2 border-t border-blue-200/60 mt-1 space-y-1">
+            <p className="text-[10px] font-bold uppercase text-slate-500 leading-5">
+              PREPARED EXCLUSIVELY FOR
+            </p>
+            <h2 className="text-[28px] font-black text-[#0f2942] leading-8 break-words">
+              {customerDisplayName}
+            </h2>
+            <p className="text-[12px] font-semibold text-slate-700 leading-5 break-words">
+              {destination || tripTitle} &nbsp;•&nbsp; {duration}
+            </p>
           </div>
 
-          {/* Top 2-Column: Price Card + Package Details */}
-          <div className="grid grid-cols-2 gap-3">
-            {/* TOTAL QUOTATION PRICE CARD */}
-            <div className="bg-[#f4f7fb] border border-blue-200/80 rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[#1e3a8a]">
-                  TOTAL QUOTATION INVESTMENT
-                </p>
-                <div className="space-y-0.5 text-xs pt-0.5">
-                  {discountAmount > 0 && (
-                    <div className="flex justify-between items-center text-slate-700">
-                      <span>Discount ({discountPercent}%)</span>
-                      <span className="font-semibold text-emerald-700">
-                        -₹{discountAmount.toLocaleString("en-IN")}
-                      </span>
-                    </div>
-                  )}
-                  {gstAmount > 0 && (
-                    <div className="flex justify-between items-center text-slate-700">
-                      <span>GST ({gstRate}%)</span>
-                      <span className="font-semibold text-slate-800">
-                        ₹{gstAmount.toLocaleString("en-IN")}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
+          <div className="pt-2 border-t border-blue-200/60 mt-1 text-[12px] text-slate-600 leading-6 text-center">
+            <p>
+              Our <strong className="text-slate-900 font-bold">{customerDisplayName}</strong>, welcome to your bespoke travel proposal! We are delighted to present this customized holiday itinerary crafted exclusively for you—upcoming journey.
+            </p>
+          </div>
+        </div>
 
-              <div className="pt-1.5 border-t border-slate-200 flex justify-between items-end">
-                <div>
-                  <p className="text-xs font-bold text-slate-900 leading-tight">Amount Payable</p>
-                  <p className="text-[9.5px] text-slate-400">
-                    {gstAmount > 0 ? `Inclusive of ${gstRate}% GST` : "All-inclusive quotation rate"}
-                  </p>
-                </div>
-                <p className="text-2xl font-black text-[#1e3a8a] tracking-tight leading-none">
-                  ₹{formattedPrice}
-                </p>
-              </div>
+        {/* --- 3. COMPANY DETAIL & EXECUTIVE SUMMARY CARD --- */}
+        <div className="rounded-2xl border border-slate-300/90 bg-white p-3.5 shadow-xs space-y-3">
+          {/* Top Row: Company Info + Quotation Info */}
+          <div className="grid grid-cols-[92px_minmax(0,1fr)_128px] gap-3 items-start">
+            <div className="flex items-start justify-center pt-0.5">
+              <CompanyLogo
+                logo={company.logo}
+                name={cleanCompanyName}
+                className="h-14 w-auto max-w-[92px] object-contain shrink-0"
+              />
             </div>
 
-            {/* PREPARED FOR & PACKAGE DETAILS */}
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">
-                  TRAVELER &amp; PACKAGE SPECIFICATIONS
+            <div className="min-w-0 border-l border-r border-slate-200 px-3 space-y-1">
+              <h3 className="text-[13px] font-black uppercase text-[#0f2942] leading-5">
+                {cleanCompanyName}
+              </h3>
+              {company.website && (
+                <p className="text-[11px] text-slate-600 font-medium leading-5 break-words">
+                  {company.website}
                 </p>
-                <div className="space-y-0.5 text-xs">
-                  <p className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Guest Name:</span>
-                    <strong className="text-slate-900">{customerDisplayName}</strong>
-                  </p>
-                  <p className="flex justify-between items-baseline gap-2">
-                    <span className="text-slate-500 font-medium shrink-0">Package:</span>
-                    <span className="font-bold text-slate-800 text-right truncate">
-                      {tripTitle || (destination ? `${destination} Tour` : "Confirmed Package")}
-                    </span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Duration:</span>
-                    <span className="font-bold text-slate-800">{duration}</span>
-                  </p>
-                  <p className="flex justify-between">
-                    <span className="text-slate-500 font-medium">Travelers:</span>
-                    <span className="font-bold text-slate-800">{guestCount}</span>
-                  </p>
-                </div>
-              </div>
-              {destination && (
-                <div className="pt-0.5 border-t border-slate-200/80 text-[10px] text-slate-500">
-                  <span>Destination: </span>
-                  <strong className="text-teal-800">{destination}</strong>
-                </div>
+              )}
+              <p className="text-[11px] text-slate-500 leading-5 break-words">
+                {company.address || "Jammu & Kashmir, India"}
+              </p>
+              {company.phone && (
+                <p className="text-[11px] text-slate-700 font-medium leading-5 break-words">
+                  {company.phone}
+                </p>
+              )}
+              {company.email && (
+                <p className="text-[11px] text-slate-700 font-medium leading-5 break-all">
+                  {company.email}
+                </p>
               )}
             </div>
+
+            <div className="text-right space-y-1 text-slate-700">
+              <p className="text-[11px] uppercase font-bold text-slate-800 leading-5">QUOTATION</p>
+              <p className="text-[11px] text-slate-700 leading-5 break-words">
+                No: <span className="font-semibold">{quotationRef}</span>
+              </p>
+              <p className="text-[11px] text-slate-700 leading-5">
+                Date: <span className="font-semibold">{quotationDate}</span>
+              </p>
+              <p className="text-[11px] text-slate-700 leading-5">
+                Valid: <span className="font-semibold">{validUntilDate}</span>
+              </p>
+            </div>
           </div>
 
-          {/* DAY-WISE ITINERARY (Timeline matching screenshot with small image in side) */}
-          <div className="pt-0.5 space-y-1.5">
-            <div className="flex items-center gap-2 border-b border-slate-200 pb-1 mb-2">
-              <div className="w-4 h-4 text-sky-600 shrink-0">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                  <line x1="16" y1="2" x2="16" y2="6"></line>
-                  <line x1="8" y1="2" x2="8" y2="6"></line>
-                  <line x1="3" y1="10" x2="21" y2="10"></line>
-                </svg>
+          <div className="border-t border-slate-200" />
+
+          {/* Bottom 2-Column: Price Card + Package Details */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Left: EXECUTIVE TRIP SUMMARY & INVESTMENT */}
+            <div className="flex flex-col min-w-0">
+              <div className="mb-1.5">
+                <span className="inline-block px-3 py-1 rounded-full bg-[#0f2942] text-white text-[10px] font-bold uppercase leading-none">
+                  EXECUTIVE TRIP SUMMARY &amp; INVESTMENT
+                </span>
               </div>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a] leading-none">
-                DETAILED DAY-WISE TOUR ITINERARY
-              </h3>
+
+              <div className="bg-[#eff6ff] border border-blue-200/70 rounded-xl p-3 flex flex-col justify-between flex-1 min-h-[118px] min-w-0">
+                <p className="font-bold text-[12px] text-[#0f2942] uppercase leading-5 break-words">
+                  TRIP: {duration} {destination || tripTitle}
+                </p>
+
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 items-end pt-2 border-t border-blue-200/60 mt-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold text-slate-700 leading-5">About/Details:</p>
+                    <p className="text-[11px] text-slate-600 font-medium leading-5 break-words">
+                      {tripTitle || (destination ? `${destination} Tour` : "Confirmed Package")}
+                    </p>
+                  </div>
+                  <p className="text-[26px] font-black text-[#0f2942] leading-none shrink-0 pl-2 border-l border-slate-300">
+                    ₹{formattedPrice}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            {firstPageDays.length > 0 ? (
-              <div className="space-y-1">
-                {firstPageDays.map((day, idx) => (
-                  <DayTimelineItem
-                    key={day.day}
-                    day={day}
-                    totalDays={activeDays.length}
-                    hotelMealPlan={activeHotels[0]?.mealPlan}
-                    isLast={idx === firstPageDays.length - 1}
-                  />
-                ))}
+            {/* Right: TRAVELER & PACKAGE SPECIFICATIONS */}
+            <div className="flex flex-col min-w-0">
+              <div className="mb-1.5">
+                <p className="text-[11px] font-bold uppercase text-[#0f2942] leading-5 py-0.5">
+                  TRAVELER &amp; PACKAGE SPECIFICATIONS
+                </p>
               </div>
-            ) : (
-              <div className="p-4 rounded-xl border border-dashed border-slate-300 text-center text-slate-500 text-xs">
-                Detailed day-wise schedule will be added to this quotation proposal.
+
+              <div className="bg-[#eff6ff] border border-blue-200/70 rounded-xl p-3 space-y-1.5 flex-1 min-h-[118px] min-w-0">
+                <PdfFieldRow label="Client Name:" value={customerDisplayName} />
+                <PdfFieldRow
+                  label="Package:"
+                  value={tripTitle || (destination ? `${destination} Tour` : "Confirmed Package")}
+                />
+                <PdfFieldRow label="Duration:" value={duration} />
+                <PdfFieldRow label="Traveler:" value={guestCount} />
+                <PdfFieldRow
+                  label="Destination:"
+                  value={destination || "Confirmed Destination"}
+                  strong
+                />
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
+        {/* --- 5. ACCREDITATION BADGES BAR --- */}
+        <div className="space-y-1">
+          <p className="text-[10px] font-bold text-slate-600 uppercase text-center leading-5">
+            INTO MEMBER &nbsp;|&nbsp; IATA ACCREDITED &nbsp;|&nbsp; ANO MEMBER &nbsp;|&nbsp; TAAP MEMBER &nbsp;|&nbsp; ATOAI MEMBER &nbsp;|&nbsp; ATOAI MEMBER
+          </p>
+          <div className="grid grid-cols-6 divide-x divide-slate-200 border-t border-b border-slate-200 py-1.5 items-center bg-white rounded-lg">
+            <IataMemberBadge />
+            <AnoMemberBadge />
+            <TripAdvisorBadge />
+            <TaapMemberBadge />
+            <AtoaiCarBadge />
+            <AtoaiMountainBadge />
+          </div>
+        </div>
+
+        {/* --- 6. PAGE FOOTER INFO & BOTTOM STRIPE --- */}
+        <div className="w-full">
+          <div className="flex items-center justify-between text-[9px] text-slate-400 pb-1">
+            <span>{cleanCompanyName} {company.phone ? `· Ph: ${company.phone}` : ""}</span>
+            <span>Page 1 of {totalPages}</span>
+          </div>
+          <div className="h-3 bg-[#0f2942] w-full" style={{ width: "calc(100% + 3.5rem)", marginLeft: "-1.75rem", marginRight: "-1.75rem" }} />
+        </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* PAGES 3..N: REMAINING DAYS (TIMELINE WITH SMALL IMAGE IN SIDE)            */}
+      {/* CONTENT PAGES: DYNAMIC SMART-PACKED SECTIONS (DAYS, STAYS, POLICIES, PAY) */}
       {/* ========================================================================= */}
-      {dayPages.map((pageDays, pIdx) => (
-        <div key={pIdx} data-pdf-page className={PAGE}>
-          <div className="p-6 pb-12 space-y-2.5">
-            <QuotationHeaderMini
-              company={company}
-              quotationRef={quotationRef}
-              quotationDate={quotationDate}
-              validUntilDate={validUntilDate}
-            />
-
-            <div className="flex items-center gap-2 border-b border-slate-200 pb-1 mb-2">
-              <div className="w-4 h-4 text-sky-600 shrink-0">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                  <line x1="16" y1="2" x2="16" y2="6"></line>
-                  <line x1="8" y1="2" x2="8" y2="6"></line>
-                  <line x1="3" y1="10" x2="21" y2="10"></line>
-                </svg>
-              </div>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a] leading-none">
-                DETAILED DAY-WISE TOUR ITINERARY (CONTINUED)
-              </h3>
-            </div>
-
-            <div className="space-y-1">
-              {pageDays.map((day, idx) => (
-                <DayTimelineItem
-                  key={day.day}
-                  day={day}
+      {contentPages.map((page, idx) => {
+        const pageNum = idx + 2;
+        return (
+          <div key={idx} data-pdf-page className={PAGE}>
+            <div className="p-5 pb-[24mm] space-y-2">
+              {page.days && (
+                <DaysSectionContent
+                  days={page.days.list}
                   totalDays={activeDays.length}
                   hotelMealPlan={activeHotels[0]?.mealPlan}
-                  isLast={idx === pageDays.length - 1}
+                  partTitle={page.days.partTitle}
+                  compact={page.days.compact}
                 />
-              ))}
+              )}
+
+              {page.hotels && (
+                <HotelsSectionContent
+                  hotels={page.hotels.list}
+                  compact={page.hotels.compact}
+                />
+              )}
+
+              {page.transports && (
+                <TransportsSectionContent transports={page.transports.list} />
+              )}
+
+              {page.activities && (
+                <ActivitiesSectionContent
+                  activities={page.activities.list}
+                  quotationDate={quotationDate}
+                />
+              )}
+
+              {page.inclusionsExclusions && (
+                <InclusionsExclusionsContent
+                  inclusions={page.inclusionsExclusions.inclusions}
+                  exclusions={page.inclusionsExclusions.exclusions}
+                />
+              )}
+
+              {page.policies && (
+                <PoliciesContent
+                  clientNotes={page.policies.clientNotes}
+                  showAccreditations={page.policies.showAccreditations}
+                />
+              )}
+
+              {page.payment && (
+                <PaymentSectionContent
+                  company={company}
+                  quotationDate={quotationDate}
+                  showMilestones={page.payment.showMilestones}
+                />
+              )}
             </div>
-          </div>
 
-          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
-        </div>
-      ))}
-
-      {/* ========================================================================= */}
-      {/* PAGE: CONFIRMED ACCOMMODATIONS & TRANSPORT FLEET                          */}
-      {/* ========================================================================= */}
-      {hasAccommodationsOrFleet && (
-        <div data-pdf-page className={PAGE}>
-          <div className="p-6 pb-12 space-y-3">
-            <QuotationHeaderMini
+            <QuotationPageFooter
+              pageNum={pageNum}
+              totalPages={totalPages}
               company={company}
-              quotationRef={quotationRef}
-              quotationDate={quotationDate}
-              validUntilDate={validUntilDate}
             />
-
-            {/* HOTELS & STAYS SECTION */}
-            {activeHotels.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                    CONFIRMED ACCOMMODATION &amp; STAYS
-                  </h3>
-                  <span className="text-[10px] text-slate-400 font-medium">
-                    {activeHotels.length} Hotel{activeHotels.length > 1 ? "s" : ""} Selected
-                  </span>
-                </div>
-
-                <div className="space-y-2.5">
-                  {activeHotels.map((hotel, hIdx) => {
-                    const nightLabels = [`${hIdx + 1}${getOrdinalSuffix(hIdx + 1)}`];
-                    const hotelPhoto =
-                      hotel.imageUrl ||
-                      (hotel.amenities?.startsWith("http") ? hotel.amenities : null);
-
-                    return (
-                      <div
-                        key={hIdx}
-                        className="bg-white rounded-xl border border-slate-200/90 p-3.5 shadow-2xs space-y-2"
-                      >
-                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
-                          <div className="flex items-center gap-1.5">
-                            {nightLabels.map((nl) => (
-                              <span
-                                key={nl}
-                                className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 text-[10px] font-bold border border-teal-100"
-                              >
-                                {nl} Night
-                              </span>
-                            ))}
-                            <span className="font-bold text-slate-900 text-xs ml-1">
-                              Stay at {hotel.location || "Confirmed Destination"}
-                            </span>
-                          </div>
-
-                          {(hotel.checkIn || hotel.checkOut) && (
-                            <p className="text-[10px] text-slate-500 font-medium">
-                              In: {formatPdfDateTime(hotel.checkIn, "14:00")} · Out:{" "}
-                              {formatPdfDateTime(hotel.checkOut, "11:00")}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-2 flex-1 min-w-0">
-                            <div>
-                              <h4 className="text-sm font-bold text-slate-900 leading-snug">
-                                {hotel.hotelName}
-                              </h4>
-                              {hotel.starRating && (
-                                <p className="text-xs text-amber-500 font-bold tracking-widest mt-0.5">
-                                  {renderStarRating(hotel.starRating)}
-                                </p>
-                              )}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3 text-xs pt-1">
-                              <div>
-                                <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
-                                  ROOM DETAILS
-                                </p>
-                                <p className="font-semibold text-slate-900 text-[11px]">
-                                  {hotel.rooms || 1} {hotel.roomCategory || "Deluxe Room"}
-                                </p>
-                                <p className="text-[10px] text-slate-500">
-                                  {hotel.rooms || 1} Room(s) · {hotel.nights || 1} Night(s)
-                                </p>
-                              </div>
-
-                              <div>
-                                <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
-                                  MEAL PLAN
-                                </p>
-                                <p className="font-bold text-teal-800 uppercase text-[11px]">
-                                  {hotel.mealPlan || "CP (Breakfast Included)"}
-                                </p>
-                              </div>
-                            </div>
-
-                            {hotel.amenities && !hotel.amenities.startsWith("http") && (
-                              <p className="text-[10px] text-slate-500 pt-0.5 border-t border-slate-100">
-                                <span className="font-semibold text-slate-600">Inclusions: </span>
-                                {hotel.amenities}
-                              </p>
-                            )}
-                          </div>
-
-                          {hotelPhoto && (
-                            <div className="w-[50mm] h-[32mm] shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-2xs">
-                              <img
-                                src={hotelPhoto}
-                                alt={hotel.hotelName}
-                                className="w-full h-full object-cover"
-                                crossOrigin={getSafeCrossOrigin(hotelPhoto)}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* TRANSPORTATION SECTION */}
-            {activeTransports.length > 0 && (
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                    TRANSPORTATION &amp; FLEET SPECIFICATIONS
-                  </h3>
-                  <span className="text-[10px] text-slate-400 font-medium">Dedicated Vehicle</span>
-                </div>
-
-                <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10.5px]">
-                    <div className="w-8">#</div>
-                    <div className="w-36">Vehicle Category</div>
-                    <div className="flex-1">Vehicle Details &amp; Inclusions</div>
-                    <div className="w-32">Route / Scope</div>
-                    <div className="w-16 text-right">Units</div>
-                  </div>
-                  {activeTransports.map((t, idx) => (
-                    <div
-                      key={idx}
-                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center text-[11px]"
-                    >
-                      <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
-                      <div className="w-36 font-bold capitalize text-slate-900">
-                        {t.vehicleType || "Private AC Vehicle"}
-                      </div>
-                      <div className="flex-1 text-slate-700 whitespace-pre-line leading-tight">
-                        {t.notes || "Dedicated AC cab with chauffeur, fuel, toll taxes & parking"}
-                      </div>
-                      <div className="w-32 text-slate-600 font-medium">{t.route || "All Transfers"}</div>
-                      <div className="w-16 text-right font-bold text-slate-800">
-                        {t.vehiclesCount ? `${t.vehiclesCount} Unit(s)` : "1"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ACTIVITIES & EXCURSIONS */}
-            {activeActivities.length > 0 && (
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                    ACTIVITIES, EXCURSIONS &amp; EXPERIENCES
-                  </h3>
-                  <span className="text-[10px] text-slate-400 font-medium">Confirmed Sightseeing</span>
-                </div>
-
-                <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10.5px]">
-                    <div className="w-8">#</div>
-                    <div className="flex-1">Activity / Attraction</div>
-                    <div className="w-44">Location</div>
-                    <div className="w-28">Date</div>
-                    <div className="w-16 text-right">Pax</div>
-                  </div>
-                  {activeActivities.map((act, idx) => (
-                    <div
-                      key={idx}
-                      className="flex px-3 py-2 border-b border-slate-150 last:border-0 bg-white items-center text-[11px]"
-                    >
-                      <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
-                      <div className="flex-1 font-bold text-slate-900 capitalize">{act.title}</div>
-                      <div className="w-44 text-slate-600 capitalize">{act.city || "--"}</div>
-                      <div className="w-28 text-slate-500">{act.date || quotationDate}</div>
-                      <div className="w-16 text-right font-bold text-slate-800">{act.pax || 1}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
-
-          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* PAGE: INCLUSIONS, EXCLUSIONS, CANCELLATION & PRIVACY POLICY (GUARANTEED)  */}
-      {/* ========================================================================= */}
-      <div data-pdf-page className={PAGE}>
-        <div className="p-6 pb-12 space-y-2.5">
-          <QuotationHeaderMini
-            company={company}
-            quotationRef={quotationRef}
-            quotationDate={quotationDate}
-            validUntilDate={validUntilDate}
-          />
-
-          <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-              INCLUSIONS, EXCLUSIONS &amp; TRAVEL POLICIES
-            </h3>
-            <span className="text-[10px] text-slate-400 font-medium">Standard Commercial Guidelines</span>
-          </div>
-
-          {/* 2-Column: INCLUSIONS & EXCLUSIONS */}
-          <div className="grid grid-cols-2 gap-3.5">
-            {/* Inclusions Card */}
-            <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3.5 space-y-2">
-              <div className="flex items-center gap-1.5 border-b border-emerald-200/80 pb-1.5">
-                <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                  <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
-                </span>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-900">
-                  PACKAGE INCLUSIONS
-                </p>
-              </div>
-
-              <ul className="space-y-1.5 text-[10.5px] text-slate-700">
-                {effectiveInclusions.length > 0 ? (
-                  effectiveInclusions.map((inc, i) => (
-                    <li key={i} className="flex items-start gap-2 leading-snug">
-                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 stroke-[2.5] mt-0.5" />
-                      <span className="font-medium text-slate-800">{inc}</span>
-                    </li>
-                  ))
-                ) : (
-                  <li className="text-[10px] text-slate-400 italic">No specific inclusions added</li>
-                )}
-              </ul>
-            </div>
-
-            {/* Exclusions Card */}
-            <div className="border border-rose-200 bg-rose-50/40 rounded-xl p-3.5 space-y-2">
-              <div className="flex items-center gap-1.5 border-b border-rose-200/80 pb-1.5">
-                <span className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shrink-0">
-                  <X className="w-2.5 h-2.5 text-white stroke-[3]" />
-                </span>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-rose-900">
-                  PACKAGE EXCLUSIONS
-                </p>
-              </div>
-
-              <ul className="space-y-1.5 text-[10.5px] text-slate-700">
-                {effectiveExclusions.length > 0 ? (
-                  effectiveExclusions.map((exc, i) => (
-                    <li key={i} className="flex items-start gap-2 leading-snug">
-                      <X className="w-3.5 h-3.5 text-rose-500 shrink-0 stroke-[2.5] mt-0.5" />
-                      <span className="font-medium text-slate-800">{exc}</span>
-                    </li>
-                  ))
-                ) : (
-                  <li className="text-[10px] text-slate-400 italic">No specific exclusions added</li>
-                )}
-              </ul>
-            </div>
-          </div>
-
-          {/* CANCELLATION & REFUND POLICY */}
-          <div className="border border-slate-200 bg-white rounded-xl p-3.5 space-y-2 shadow-2xs">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-1">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[#1e3a8a]">
-                CANCELLATION &amp; REFUND GUIDELINES
-              </p>
-              <span className="text-[9.5px] text-slate-400">Calculated from departure date</span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 text-center pt-0.5">
-              {DEFAULT_CANCELLATION_POLICY.map((p, idx) => (
-                <div
-                  key={idx}
-                  className="bg-slate-50 border border-slate-200/80 rounded-lg p-2 space-y-0.5"
-                >
-                  <p className="text-[10px] font-bold text-slate-500 uppercase">{p.period}</p>
-                  <p
-                    className={`text-xs font-black ${
-                      idx === 0
-                        ? "text-emerald-700"
-                        : idx === 1
-                        ? "text-amber-700"
-                        : "text-rose-700"
-                    }`}
-                  >
-                    {p.refund}
-                  </p>
-                  <p className="text-[9px] text-slate-400 leading-tight">{p.detail}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* PRIVACY POLICY & TRAVELER DATA PROTECTION */}
-          <div className="border border-blue-200 bg-blue-50/30 rounded-xl p-3.5 space-y-1.5 shadow-2xs">
-            <div className="flex items-center gap-1.5">
-              <span className="w-4 h-4 rounded-full bg-[#1e3a8a] text-white flex items-center justify-center shrink-0">
-                <Lock className="w-2.5 h-2.5 text-white" />
-              </span>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[#1e3a8a]">
-                PRIVACY POLICY &amp; DATA PROTECTION
-              </p>
-            </div>
-            <p className="text-[10.5px] text-slate-600 leading-relaxed font-normal">
-              We respect and safeguard your privacy. All traveler information, government identification proofs (Aadhaar / Passport), contact numbers, and billing details collected during the inquiry and booking process are used strictly for airline ticketing, hotel reservations, transport permits, and official travel vouchers. We never sell, rent, or disclose client data to unauthorized third parties.
-            </p>
-          </div>
-
-          {/* GENERAL TERMS & IMPORTANT NOTES */}
-          <div className="border border-slate-200 bg-slate-50/50 rounded-xl p-3 space-y-1.5">
-            <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-700">
-              GENERAL TERMS &amp; TRAVEL GUIDELINES
-            </p>
-            <ul className="space-y-1 text-[10px] text-slate-600">
-              <li className="flex items-start gap-1.5">
-                <span className="text-slate-400">•</span>
-                <span>Standard hotel check-in time is 14:00 hrs and check-out time is 11:00 hrs across all properties.</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <span className="text-slate-400">•</span>
-                <span>Government-issued Photo ID (Aadhaar, Passport, or Voter ID) is mandatory for all adult guests upon check-in.</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <span className="text-slate-400">•</span>
-                <span>Vehicles are provided for designated itinerary transfers and sightseeing; not available on a 24-hour disposal basis.</span>
-              </li>
-            </ul>
-
-            {/* User Custom Notes if any */}
-            {clientNotes && (
-              <div className="pt-2 border-t border-slate-200 mt-1">
-                <p className="text-[10px] font-bold uppercase text-teal-800 mb-0.5">Special Agent Notes:</p>
-                <p className="text-[10.5px] text-slate-700 whitespace-pre-line leading-relaxed bg-white p-2 rounded-lg border border-teal-200">
-                  {clientNotes}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
-      </div>
-
-      {/* ========================================================================= */}
-      {/* PAGE: PAYMENT OPTIONS & BANK TRANSFER                                     */}
-      {/* ========================================================================= */}
-      {hasPaymentDetails && (
-        <div data-pdf-page className={PAGE}>
-          <div className="p-6 pb-12 space-y-3">
-            <QuotationHeaderMini
-              company={company}
-              quotationRef={quotationRef}
-              quotationDate={quotationDate}
-              validUntilDate={validUntilDate}
-            />
-
-            <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-                PAYMENT DETAILS &amp; BANK TRANSFER OPTIONS
-              </h3>
-              <span className="text-[10px] text-slate-400 font-medium">Secure Payment Gateway</span>
-            </div>
-
-            {/* Bank Card + QR Code */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-              <div className="flex items-start justify-between gap-6">
-                <div className="space-y-2 text-xs text-slate-700 flex-1">
-                  <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
-                    BANK TRANSFER DETAILS
-                  </p>
-
-                  {company.accountHolder && (
-                    <div className="flex justify-between border-b border-slate-100 pb-1">
-                      <span className="text-slate-500 font-medium">Account Name:</span>
-                      <strong className="text-slate-900">{company.accountHolder}</strong>
-                    </div>
-                  )}
-                  {company.bankName && (
-                    <div className="flex justify-between border-b border-slate-100 pb-1">
-                      <span className="text-slate-500 font-medium">Bank Name:</span>
-                      <strong className="text-slate-900">{company.bankName}</strong>
-                    </div>
-                  )}
-                  {company.accountNumber && (
-                    <div className="flex justify-between border-b border-slate-100 pb-1">
-                      <span className="text-slate-500 font-medium">Account Number:</span>
-                      <strong className="font-mono text-slate-900 text-sm tracking-wider">
-                        {company.accountNumber}
-                      </strong>
-                    </div>
-                  )}
-                  {company.ifsc && (
-                    <div className="flex justify-between border-b border-slate-100 pb-1">
-                      <span className="text-slate-500 font-medium">IFSC Code:</span>
-                      <strong className="font-mono text-slate-900 text-sm tracking-wider">
-                        {company.ifsc}
-                      </strong>
-                    </div>
-                  )}
-                  {company.upiId && (
-                    <div className="flex justify-between border-b border-slate-100 pb-1">
-                      <span className="text-slate-500 font-medium">UPI ID:</span>
-                      <strong className="font-mono text-teal-800 font-bold">{company.upiId}</strong>
-                    </div>
-                  )}
-                  {company.phone && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-500 font-medium">Phone / WhatsApp:</span>
-                      <strong className="font-mono text-slate-900">{company.phone}</strong>
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-2 pt-2">
-                    <span className="text-slate-400 font-medium text-[10.5px]">Supported Modes:</span>
-                    <PaytmBadge />
-                    <GpayBadge />
-                    <PhonePeBadge />
-                    <span className="text-[10px] font-semibold text-slate-500 px-2 py-0.5 rounded bg-slate-100">
-                      NEFT / IMPS / RTGS
-                    </span>
-                  </div>
-                </div>
-
-                {/* Instant QR Code */}
-                {company.upiId && (
-                  <div className="flex flex-col items-center shrink-0 pl-4 border-l border-slate-200">
-                    <div className="p-2 border border-slate-300 rounded-xl bg-white shadow-2xs">
-                      <UpiPaymentQr size={130} upiId={company.upiId} />
-                    </div>
-                    <span className="text-[9.5px] font-bold text-teal-800 mt-1">Scan &amp; Pay via UPI</span>
-                    <span className="text-[8.5px] text-slate-400">Zero Convenience Fee</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* BOOKING PROCESS & CONFIRMATION MILESTONES */}
-            <div className="border border-slate-200 bg-slate-50/60 rounded-xl p-4 space-y-2">
-              <p className="text-[10.5px] font-bold uppercase tracking-wider text-[#1e3a8a]">
-                BOOKING &amp; CONFIRMATION MILESTONES
-              </p>
-              <div className="grid grid-cols-3 gap-2.5 text-xs">
-                <div className="bg-white rounded-lg p-2.5 border border-slate-200 space-y-1">
-                  <span className="text-xs font-black text-teal-700">01. Deposit</span>
-                  <p className="font-bold text-slate-800 text-[11px]">25% Advance</p>
-                  <p className="text-[9.5px] text-slate-500 leading-tight">
-                    Secures hotel reservations and vehicle fleet block.
-                  </p>
-                </div>
-                <div className="bg-white rounded-lg p-2.5 border border-slate-200 space-y-1">
-                  <span className="text-xs font-black text-blue-700">02. Balance</span>
-                  <p className="font-bold text-slate-800 text-[11px]">75% Balance</p>
-                  <p className="text-[9.5px] text-slate-500 leading-tight">
-                    Payable 15 days prior to scheduled tour departure.
-                  </p>
-                </div>
-                <div className="bg-white rounded-lg p-2.5 border border-slate-200 space-y-1">
-                  <span className="text-xs font-black text-emerald-700">03. Vouchers</span>
-                  <p className="font-bold text-slate-800 text-[11px]">Travel Vouchers</p>
-                  <p className="text-[9.5px] text-slate-500 leading-tight">
-                    Receive verified hotel vouchers and driver contact details.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* AUTHORIZED SIGN-OFF & STAMP */}
-            <div className="pt-2 flex items-end justify-between text-xs text-slate-600">
-              <div className="space-y-1">
-                <p className="text-[10px] uppercase font-bold text-slate-400">QUOTATION ISSUED BY</p>
-                <p className="font-bold text-slate-900 text-sm">{company.name || "Authorized Travel Partner"}</p>
-                <p className="text-[11px] text-slate-500">
-                  {[company.email, company.phone].filter(Boolean).join(" · ")}
-                </p>
-              </div>
-
-              <div className="text-center space-y-1">
-                <div className="w-40 h-16 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-[10px] text-slate-400 bg-white">
-                  Authorized Sign &amp; Seal
-                </div>
-                <p className="text-[9px] text-slate-400">Official Travel Specialist Signature</p>
-              </div>
-            </div>
-          </div>
-
-          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
-        </div>
-      )}
+        );
+      })}
 
       {/* ========================================================================= */}
       {/* PAGE: GUEST PICTURES (ONLY IF USER UPLOADED ACTUAL GUEST PHOTOS)          */}
@@ -1123,10 +914,729 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
             </div>
           </div>
 
-          <QuotationPageFooter pageNum={currentPage++} totalPages={totalPages} company={company} />
+          <QuotationPageFooter
+            pageNum={totalPages}
+            totalPages={totalPages}
+            company={company}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+// =========================================================================
+// SECTION CONTENT COMPONENTS (SMART PACKABLE)
+// =========================================================================
+
+function DaysSectionContent({
+  days,
+  totalDays,
+  hotelMealPlan,
+  partTitle,
+  compact = false,
+}: {
+  days: DetailedItineraryDay[];
+  totalDays: number;
+  hotelMealPlan?: string;
+  partTitle?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={compact ? "space-y-0.5" : "space-y-1"}>
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-1 mb-1">
+        <div className="w-4 h-4 text-sky-600 shrink-0">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-4 h-4"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+        </div>
+        <h3 className="text-[13px] font-bold uppercase tracking-wider text-[#1e3a8a] leading-5">
+          {partTitle || "DETAILED DAY-WISE TOUR ITINERARY"}
+        </h3>
+      </div>
+
+      <div className={compact ? "space-y-1" : "space-y-1.5"}>
+        {days.map((day, idx) => (
+          <DayTimelineItem
+            key={day.day}
+            day={day}
+            totalDays={totalDays}
+            hotelMealPlan={hotelMealPlan}
+            isLast={idx === days.length - 1}
+            compact={compact}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HotelsSectionContent({
+  hotels,
+  compact = false,
+}: {
+  hotels: ItineraryHotel[];
+  compact?: boolean;
+}) {
+  if (!hotels || hotels.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 pt-0.5">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+          CONFIRMED ACCOMMODATION &amp; STAYS
+        </h3>
+        <span className="text-[10px] text-slate-400 font-medium">
+          {hotels.length} Hotel{hotels.length > 1 ? "s" : ""} Selected
+        </span>
+      </div>
+
+      <div className={compact ? "space-y-1" : "space-y-1.5"}>
+        {hotels.map((hotel, hIdx) => {
+          const nightLabels = [`${hIdx + 1}${getOrdinalSuffix(hIdx + 1)}`];
+          const hotelPhoto =
+            hotel.imageUrl ||
+            (hotel.amenities?.startsWith("http") ? hotel.amenities : null);
+
+          return (
+            <div
+              key={hIdx}
+              className={`bg-white rounded-xl border border-slate-200/90 shadow-2xs ${
+                compact ? "p-2 space-y-0.5" : "p-2.5 space-y-1.5"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-0.5">
+                <div className="flex items-center gap-1.5">
+                  {nightLabels.map((nl) => (
+                    <span
+                      key={nl}
+                      className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 text-[9px] font-bold border border-teal-100"
+                    >
+                      {nl} Night
+                    </span>
+                  ))}
+                  <span className="font-bold text-slate-900 text-[11px] ml-1">
+                    Stay at {hotel.location || "Confirmed Destination"}
+                  </span>
+                </div>
+
+                {(hotel.checkIn || hotel.checkOut) && (
+                  <p className="text-[9px] text-slate-500 font-medium">
+                    In: {formatPdfDateTime(hotel.checkIn, "14:00")} · Out:{" "}
+                    {formatPdfDateTime(hotel.checkOut, "11:00")}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-0.5 flex-1 min-w-0">
+                  <div>
+                    <h4 className="text-[12px] font-bold text-slate-900 leading-snug">
+                      {hotel.hotelName}
+                    </h4>
+                    {hotel.starRating && (
+                      <p className="text-[9.5px] text-amber-500 font-bold tracking-widest mt-0.5">
+                        {renderStarRating(hotel.starRating)}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-0.5">
+                    <div>
+                      <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
+                        ROOM DETAILS
+                      </p>
+                      <p className="font-semibold text-slate-900 text-[9.5px]">
+                        {hotel.rooms || 1} {hotel.roomCategory || "Deluxe Room"}
+                      </p>
+                      <p className="text-[8.5px] text-slate-500">
+                        {hotel.rooms || 1} Room(s) · {hotel.nights || 1} Night(s)
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
+                        MEAL PLAN
+                      </p>
+                      <p className="font-bold text-teal-800 uppercase text-[9.5px]">
+                        {hotel.mealPlan || "CP (Breakfast Included)"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {hotel.amenities && !hotel.amenities.startsWith("http") && (
+                    <p className="text-[8.5px] text-slate-500 pt-0.5 border-t border-slate-100">
+                      <span className="font-semibold text-slate-600">Inclusions: </span>
+                      {hotel.amenities}
+                    </p>
+                  )}
+                </div>
+
+                {hotelPhoto && (
+                  <div
+                    className={`${
+                      compact ? "w-[40mm] h-[24mm]" : "w-[46mm] h-[28mm]"
+                    } shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-2xs`}
+                  >
+                    <img
+                      src={hotelPhoto}
+                      alt={hotel.hotelName}
+                      className="w-full h-full object-cover"
+                      crossOrigin={getSafeCrossOrigin(hotelPhoto)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TransportsSectionContent({
+  transports,
+}: {
+  transports: ItineraryTransport[];
+}) {
+  if (!transports || transports.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 pt-0.5">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+          TRANSPORTATION &amp; FLEET SPECIFICATIONS
+        </h3>
+        <span className="text-[10px] text-slate-400 font-medium">Dedicated Vehicle</span>
+      </div>
+
+      <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
+        <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10px]">
+          <div className="w-8">#</div>
+          <div className="w-32">Vehicle Category</div>
+          <div className="flex-1">Vehicle Details &amp; Inclusions</div>
+          <div className="w-28">Route / Scope</div>
+          <div className="w-16 text-right">Units</div>
+        </div>
+        {transports.map((t, idx) => (
+          <div
+            key={idx}
+            className="flex px-3 py-1.5 border-b border-slate-150 last:border-0 bg-white items-center text-[10.5px]"
+          >
+            <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
+            <div className="w-32 font-bold capitalize text-slate-900">
+              {t.vehicleType || "Private AC Vehicle"}
+            </div>
+            <div className="flex-1 text-slate-700 whitespace-pre-line leading-tight">
+              {t.notes || "Dedicated AC cab with chauffeur, fuel, toll taxes & parking"}
+            </div>
+            <div className="w-28 text-slate-600 font-medium">{t.route || "All Transfers"}</div>
+            <div className="w-16 text-right font-bold text-slate-800">
+              {t.vehiclesCount ? `${t.vehiclesCount} Unit(s)` : "1"}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActivitiesSectionContent({
+  activities,
+  quotationDate,
+}: {
+  activities: ItinerarySightseeing[];
+  quotationDate?: string;
+}) {
+  if (!activities || activities.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 pt-0.5">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+          ACTIVITIES, EXCURSIONS &amp; EXPERIENCES
+        </h3>
+        <span className="text-[10px] text-slate-400 font-medium">Confirmed Sightseeing</span>
+      </div>
+
+      <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
+        <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10px]">
+          <div className="w-8">#</div>
+          <div className="flex-1">Activity / Attraction</div>
+          <div className="w-36">Location</div>
+          <div className="w-24">Date</div>
+          <div className="w-16 text-right">Pax</div>
+        </div>
+        {activities.map((act, idx) => (
+          <div
+            key={idx}
+            className="flex px-3 py-1.5 border-b border-slate-150 last:border-0 bg-white items-center text-[10.5px]"
+          >
+            <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
+            <div className="flex-1 font-bold text-slate-900 capitalize">{act.title}</div>
+            <div className="w-36 text-slate-600 capitalize">{act.city || "--"}</div>
+            <div className="w-24 text-slate-500">{act.date || quotationDate}</div>
+            <div className="w-16 text-right font-bold text-slate-800">{act.pax || 1}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InclusionsExclusionsContent({
+  inclusions,
+  exclusions,
+}: {
+  inclusions: string[];
+  exclusions: string[];
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+          INCLUSIONS &amp; EXCLUSIONS
+        </h3>
+        <span className="text-[10px] text-slate-400 font-medium">Commercial Guidelines</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {/* Inclusions Card */}
+        <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 space-y-1.5">
+          <div className="flex items-center gap-1.5 border-b border-emerald-200/80 pb-1">
+            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+              <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
+            </span>
+            <p className="text-[10.5px] font-bold uppercase tracking-wider text-emerald-900">
+              PACKAGE INCLUSIONS
+            </p>
+          </div>
+
+          <ul className="space-y-1 text-[10px] text-slate-700">
+            {inclusions.length > 0 ? (
+              inclusions.map((inc, i) => (
+                <li key={i} className="flex items-start gap-1.5 leading-snug">
+                  <Check className="w-3 h-3 text-emerald-600 shrink-0 stroke-[2.5] mt-0.5" />
+                  <span className="font-medium text-slate-800">{inc}</span>
+                </li>
+              ))
+            ) : (
+              <li className="text-[9.5px] text-slate-400 italic">No specific inclusions added</li>
+            )}
+          </ul>
+        </div>
+
+        {/* Exclusions Card */}
+        <div className="border border-rose-200 bg-rose-50/40 rounded-xl p-3 space-y-1.5">
+          <div className="flex items-center gap-1.5 border-b border-rose-200/80 pb-1">
+            <span className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shrink-0">
+              <X className="w-2.5 h-2.5 text-white stroke-[3]" />
+            </span>
+            <p className="text-[10.5px] font-bold uppercase tracking-wider text-rose-900">
+              PACKAGE EXCLUSIONS
+            </p>
+          </div>
+
+          <ul className="space-y-1 text-[10px] text-slate-700">
+            {exclusions.length > 0 ? (
+              exclusions.map((exc, i) => (
+                <li key={i} className="flex items-start gap-1.5 leading-snug">
+                  <X className="w-3 h-3 text-rose-500 shrink-0 stroke-[2.5] mt-0.5" />
+                  <span className="font-medium text-slate-800">{exc}</span>
+                </li>
+              ))
+            ) : (
+              <li className="text-[9.5px] text-slate-400 italic">No specific exclusions added</li>
+            )}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PoliciesContent({
+  clientNotes,
+  showAccreditations = false,
+}: {
+  clientNotes?: string;
+  showAccreditations?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      {/* CANCELLATION & REFUND POLICY */}
+      <div className="border border-slate-200 bg-white rounded-xl p-2.5 space-y-1.5 shadow-2xs">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-1">
+          <p className="text-[10.5px] font-bold uppercase tracking-wider text-[#1e3a8a]">
+            CANCELLATION &amp; REFUND GUIDELINES
+          </p>
+          <span className="text-[9px] text-slate-400">Calculated from departure date</span>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 text-center pt-0.5">
+          {DEFAULT_CANCELLATION_POLICY.map((p, idx) => (
+            <div
+              key={idx}
+              className="bg-slate-50 border border-slate-200/80 rounded-lg p-1.5 space-y-0.5"
+            >
+              <p className="text-[9.5px] font-bold text-slate-500 uppercase">{p.period}</p>
+              <p
+                className={`text-[11px] font-black ${
+                  idx === 0
+                    ? "text-emerald-700"
+                    : idx === 1
+                    ? "text-amber-700"
+                    : "text-rose-700"
+                }`}
+              >
+                {p.refund}
+              </p>
+              <p className="text-[8.5px] text-slate-400 leading-tight">{p.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* PRIVACY POLICY & TRAVELER DATA PROTECTION */}
+      <div className="border border-blue-200 bg-blue-50/30 rounded-xl p-2.5 space-y-1 shadow-2xs">
+        <div className="flex items-center gap-1.5">
+          <span className="w-3.5 h-3.5 rounded-full bg-[#1e3a8a] text-white flex items-center justify-center shrink-0">
+            <Lock className="w-2 h-2 text-white" />
+          </span>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#1e3a8a]">
+            PRIVACY POLICY &amp; DATA PROTECTION
+          </p>
+        </div>
+        <p className="text-[9.5px] text-slate-600 leading-relaxed font-normal">
+          We respect and safeguard your privacy. Traveler information, ID proofs, contact numbers, and billing details are used strictly for airline ticketing, hotel reservations, transport permits, and official travel vouchers. We never sell, rent, or disclose client data.
+        </p>
+      </div>
+
+      {/* GENERAL TERMS & IMPORTANT NOTES */}
+      <div className="border border-slate-200 bg-slate-50/50 rounded-xl p-2.5 space-y-1">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-700">
+          GENERAL TERMS &amp; TRAVEL GUIDELINES
+        </p>
+        <ul className="space-y-0.5 text-[9.5px] text-slate-600">
+          <li className="flex items-start gap-1.5">
+            <span className="text-slate-400">•</span>
+            <span>Hotel check-in time is 14:00 hrs and check-out time is 11:00 hrs.</span>
+          </li>
+          <li className="flex items-start gap-1.5">
+            <span className="text-slate-400">•</span>
+            <span>Government Photo ID (Aadhaar / Passport) is mandatory upon check-in.</span>
+          </li>
+          <li className="flex items-start gap-1.5">
+            <span className="text-slate-400">•</span>
+            <span>Vehicles are provided for designated itinerary transfers; not 24-hr disposal.</span>
+          </li>
+        </ul>
+
+        {clientNotes && (
+          <div className="pt-1.5 border-t border-slate-200 mt-1">
+            <p className="text-[9.5px] font-bold uppercase text-teal-800 mb-0.5">Special Agent Notes:</p>
+            <p className="text-[10px] text-slate-700 whitespace-pre-line leading-relaxed bg-white p-2 rounded-lg border border-teal-200">
+              {clientNotes}
+            </p>
+          </div>
+        )}
+
+        {showAccreditations && (
+          <div className="pt-2 border-t border-slate-200">
+            <p className="text-[8px] uppercase tracking-wider text-slate-400 font-semibold text-center mb-1">
+              MOT REGISTERED · IATA ACCREDITED · IATO MEMBER · TAAI MEMBER · ADTOI MEMBER · ATOAI MEMBER
+            </p>
+            <div className="flex items-center justify-center gap-6 flex-wrap">
+              <MotBadge />
+              <IataBadge />
+              <IatoBadge />
+              <TaaiBadge />
+              <AdtoiBadge />
+              <AtoaiBadge />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PaymentSectionContent({
+  company,
+  quotationDate,
+  showMilestones = true,
+}: {
+  company: any;
+  quotationDate?: string;
+  showMilestones?: boolean;
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+          PAYMENT DETAILS &amp; BANK TRANSFER OPTIONS
+        </h3>
+        <span className="text-[10px] text-slate-400 font-medium">Secure Payment Gateway</span>
+      </div>
+
+      {/* Bank Card + QR Code */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-2">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1.5 text-xs text-slate-700 flex-1">
+            <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
+              BANK TRANSFER DETAILS
+            </p>
+
+            {company.accountHolder && (
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+                <span className="text-slate-500 font-medium">Account Name:</span>
+                <strong className="text-slate-900">{company.accountHolder}</strong>
+              </div>
+            )}
+            {company.bankName && (
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+                <span className="text-slate-500 font-medium">Bank Name:</span>
+                <strong className="text-slate-900">{company.bankName}</strong>
+              </div>
+            )}
+            {company.accountNumber && (
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+                <span className="text-slate-500 font-medium">Account Number:</span>
+                <strong className="font-mono text-slate-900 tracking-wider">
+                  {company.accountNumber}
+                </strong>
+              </div>
+            )}
+            {company.ifsc && (
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+                <span className="text-slate-500 font-medium">IFSC Code:</span>
+                <strong className="font-mono text-slate-900 tracking-wider">
+                  {company.ifsc}
+                </strong>
+              </div>
+            )}
+            {company.upiId && (
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+                <span className="text-slate-500 font-medium">UPI ID:</span>
+                <strong className="font-mono text-teal-800 font-bold">{company.upiId}</strong>
+              </div>
+            )}
+            {company.phone && (
+              <div className="flex justify-between text-[10.5px]">
+                <span className="text-slate-500 font-medium">Phone / WhatsApp:</span>
+                <strong className="font-mono text-slate-900">{company.phone}</strong>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-slate-400 font-medium text-[9.5px]">Supported:</span>
+              <PaytmBadge />
+              <GpayBadge />
+              <PhonePeBadge />
+              <span className="text-[9px] font-semibold text-slate-500 px-1.5 py-0.5 rounded bg-slate-100">
+                NEFT / RTGS
+              </span>
+            </div>
+          </div>
+
+          {/* Instant QR Code */}
+          {(company.qrCode || company.upiId) && (
+            <div className="flex flex-col items-center shrink-0 pl-3 border-l border-slate-200">
+              <div className="p-1.5 border border-slate-300 rounded-lg bg-white shadow-2xs">
+                {company.qrCode ? (
+                  <img
+                    src={resolveImageUrl(company.qrCode)}
+                    alt="Payment QR Code"
+                    className="w-[105px] h-[105px] object-contain rounded"
+                    crossOrigin={getSafeCrossOrigin(company.qrCode)}
+                  />
+                ) : (
+                  <UpiPaymentQr size={105} upiId={company.upiId} />
+                )}
+              </div>
+              <span className="text-[9px] font-bold text-teal-800 mt-1">Scan &amp; Pay via UPI</span>
+              <span className="text-[8px] text-slate-400">Zero Convenience Fee</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* BOOKING PROCESS & CONFIRMATION MILESTONES (if showMilestones) */}
+      {showMilestones && (
+        <div className="border border-slate-200 bg-slate-50/60 rounded-xl p-2.5 space-y-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#1e3a8a]">
+            BOOKING &amp; CONFIRMATION MILESTONES
+          </p>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="bg-white rounded-lg p-2 border border-slate-200 space-y-0.5">
+              <span className="text-[11px] font-black text-teal-700">01. Deposit</span>
+              <p className="font-bold text-slate-800 text-[10.5px]">25% Advance</p>
+              <p className="text-[9px] text-slate-500 leading-tight">
+                Secures hotel reservations and vehicle fleet block.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-2 border border-slate-200 space-y-0.5">
+              <span className="text-[11px] font-black text-blue-700">02. Balance</span>
+              <p className="font-bold text-slate-800 text-[10.5px]">75% Balance</p>
+              <p className="text-[9px] text-slate-500 leading-tight">
+                Payable 15 days prior to scheduled tour departure.
+              </p>
+            </div>
+            <div className="bg-white rounded-lg p-2 border border-slate-200 space-y-0.5">
+              <span className="text-[11px] font-black text-emerald-700">03. Vouchers</span>
+              <p className="font-bold text-slate-800 text-[10.5px]">Travel Vouchers</p>
+              <p className="text-[9px] text-slate-500 leading-tight">
+                Receive verified hotel vouchers and driver contact details.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AUTHORIZED SIGN-OFF & STAMP */}
+      <div className="pt-1 flex items-end justify-between text-xs text-slate-600">
+        <div className="space-y-0.5">
+          <p className="text-[9.5px] uppercase font-bold text-slate-400">QUOTATION ISSUED BY</p>
+          <p className="font-bold text-slate-900 text-[13px]">
+            {(company.name || "Authorized Travel Partner").replace(/^\.+/, "").trim()}
+          </p>
+          <p className="text-[10px] text-slate-500">
+            {[company.email, company.phone].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+
+        <div className="text-center space-y-0.5">
+          <div className="w-36 h-12 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-[9.5px] text-slate-400 bg-white">
+            Authorized Sign &amp; Seal
+          </div>
+          <p className="text-[8.5px] text-slate-400">Official Travel Specialist Signature</p>
+        </div>
+      </div>
+
+      {/* GOOGLE REVIEWS & CLIENT TESTIMONIALS (PRINTED ON LAST PAGE AFTER PAYMENT) */}
+      <div className="pt-2 border-t border-slate-200 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+              <path
+                fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+              />
+            </svg>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-800">
+              Verified Client Reviews &amp; Testimonials
+            </span>
+          </div>
+          <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+            ★★★★★ 5.0 Rating · Google Reviews
+          </span>
+        </div>
+
+        <div className="rounded-xl overflow-hidden border border-slate-200/90 shadow-2xs bg-white flex items-center justify-center p-1">
+          <ReviewsBanner
+            bannerSrc={company.reviewsBanner}
+            className="w-full h-auto max-h-[58mm] object-contain rounded-lg"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewsBanner({
+  bannerSrc,
+  className = "w-full h-auto object-contain",
+}: {
+  bannerSrc?: string;
+  className?: string;
+}) {
+  const [dataUrl, setDataUrl] = useState<string>("");
+
+  const resolvedUrl = useMemo(() => {
+    if (typeof window !== "undefined") {
+      const cached = localStorage.getItem("agency_reviews_banner_data");
+      if (cached && cached.startsWith("data:image")) return cached;
+    }
+    return resolveImageUrl(bannerSrc || "/google-reviews-banner.png");
+  }, [bannerSrc]);
+
+  useEffect(() => {
+    if (!resolvedUrl) {
+      setDataUrl("");
+      return;
+    }
+    if (resolvedUrl.startsWith("data:") || resolvedUrl.startsWith("blob:")) {
+      setDataUrl(resolvedUrl);
+      return;
+    }
+
+    let active = true;
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const b64 = canvas.toDataURL("image/png");
+          if (active && b64 && b64.length > 50) {
+            setDataUrl(b64);
+            try {
+              localStorage.setItem("agency_reviews_banner_data", b64);
+            } catch {}
+            return;
+          }
+        }
+      } catch (e) {}
+      if (active) setDataUrl(resolvedUrl);
+    };
+    img.onerror = () => {
+      if (active) setDataUrl(resolvedUrl);
+    };
+    img.src = resolvedUrl;
+
+    return () => {
+      active = false;
+    };
+  }, [resolvedUrl]);
+
+  const effectiveSrc = dataUrl || resolvedUrl;
+  if (!effectiveSrc) return null;
+
+  return (
+    <img
+      src={effectiveSrc}
+      alt="Google Reviews & Client Feedback"
+      className={className}
+      crossOrigin={getSafeCrossOrigin(effectiveSrc)}
+    />
   );
 }
 
@@ -1180,62 +1690,89 @@ function DayTimelineItem({
   totalDays,
   hotelMealPlan,
   isLast,
+  compact = false,
 }: {
   day: DetailedItineraryDay;
   totalDays: number;
   hotelMealPlan?: string;
   isLast?: boolean;
+  compact?: boolean;
 }) {
   const photo = day.images?.[0];
   const cleanTitle = day.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, "").trim() || "Tour & Sightseeing";
-  const meals = getDayMeals(day, totalDays, hotelMealPlan);
-  const highlights = getDayHighlights(day);
+  const points = parseDayPoints(day.description, day.activities, day.title);
+  const explicitHighlights = day.highlights && day.highlights.length > 0 ? day.highlights.join(", ") : "";
 
   return (
-    <div className="flex items-stretch gap-2.5">
-      {/* Timeline Column: Circle Badge + Connecting Vertical Line */}
-      <div className="flex flex-col items-center shrink-0 w-5 pt-0.5">
-        <div className="w-5 h-5 rounded-full bg-[#0284c7] text-white flex items-center justify-center font-bold text-[10px] shadow-xs shrink-0 ring-2 ring-white">
+    <div className={`flex items-stretch ${compact ? "gap-2" : "gap-2.5"}`}>
+      <div className={`flex flex-col items-center shrink-0 ${compact ? "w-6" : "w-7"} pt-0.5`}>
+        <div
+          className={`${
+            compact ? "w-6 h-6 text-xs" : "w-7 h-7 text-[13px]"
+          } rounded-full bg-[#0284c7] text-white flex items-center justify-center font-bold shadow-xs shrink-0 ring-2 ring-white`}
+        >
           {day.day}
         </div>
-        {!isLast && (
-          <div className="w-[2px] flex-1 bg-sky-200 my-1" />
-        )}
+        {!isLast && <div className="w-[2px] flex-1 bg-sky-200 my-1" />}
       </div>
 
-      {/* Day Card */}
-      <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/90 p-2.5 shadow-2xs space-y-1 mb-1.5">
-        {/* Top Header of Card: Day Title on left, Meals badge on right */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-0.5">
-          <h4 className="text-xs font-bold text-slate-900 leading-snug">
+      <div
+        className={`flex-1 min-w-0 bg-white rounded-xl border border-slate-200/90 shadow-2xs ${
+          compact ? "p-2 space-y-1" : "p-2.5 space-y-1.5"
+        }`}
+      >
+        <div className="border-b border-slate-100 pb-0.5">
+          <h4
+            className={`${
+              compact ? "text-[12px] leading-snug" : "text-[13px] leading-5"
+            } font-bold text-slate-900 break-words`}
+          >
             Day {day.day}: {cleanTitle}
           </h4>
-          <span className="shrink-0 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/90 text-[9px] font-semibold tracking-tight">
-            Meals: {meals}
-          </span>
         </div>
 
-        {/* Content & Small Image on the side */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0 space-y-0.5">
-            <p className="text-[10px] text-slate-600 leading-relaxed font-normal whitespace-pre-line">
-              {day.description}
-            </p>
+        <div className={`flex items-start ${compact ? "gap-2.5" : "gap-3"}`}>
+          <div className={`flex-1 min-w-0 ${compact ? "space-y-1" : "space-y-1.5"}`}>
+            <ul className={compact ? "space-y-0.5" : "space-y-1"}>
+              {points.map((point, pIdx) => (
+                <li key={pIdx} className="flex items-start gap-1.5">
+                  <span
+                    className={`${
+                      compact ? "mt-[5px] w-[5px] h-[5px]" : "mt-[7px] w-[6px] h-[6px]"
+                    } rounded-full bg-[#0284c7] shrink-0`}
+                  />
+                  <span
+                    className={`${
+                      compact ? "text-[10.5px] leading-snug" : "text-[11.5px] leading-5"
+                    } text-slate-800 break-words`}
+                  >
+                    {point}
+                  </span>
+                </li>
+              ))}
+            </ul>
 
-            {highlights && (
-              <div className="flex items-start gap-1 text-[9.5px] pt-0.5 border-t border-slate-100 leading-tight">
-                <Sparkles className="w-3 h-3 text-amber-500 shrink-0 mt-0.5" />
+            {explicitHighlights && (
+              <div
+                className={`flex items-start gap-1.5 ${
+                  compact ? "text-[10px] leading-snug pt-0.5" : "text-[11px] leading-5 pt-1"
+                } border-t border-slate-100`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
                 <p className="text-slate-600">
                   <strong className="text-slate-800 font-bold">Highlights: </strong>
-                  <span>{highlights}</span>
+                  <span>{explicitHighlights}</span>
                 </p>
               </div>
             )}
           </div>
 
-          {/* Small image in side */}
           {photo && (
-            <div className="w-[34mm] h-[22mm] shrink-0 overflow-hidden rounded-lg border border-slate-200/90 shadow-2xs bg-slate-50">
+            <div
+              className={`${
+                compact ? "w-[44mm] h-[26mm]" : "w-[48mm] h-[32mm]"
+              } shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-sm bg-slate-50`}
+            >
               <img
                 src={photo}
                 alt={day.title}
@@ -1258,19 +1795,24 @@ function QuotationPageFooter({
   pageNum: number;
   totalPages: number;
   company: {
+    name?: string;
     website?: string;
     phone?: string;
     instagram?: string;
     facebook?: string;
   };
 }) {
+  const cleanName = (company?.name || "HOLIDAYS BINDAS").replace(/^\.+/, "").trim();
+
   return (
     <>
-      <div className="absolute bottom-8 left-0 right-0 text-center text-[9px] text-slate-400 font-normal">
+      <div className="absolute bottom-9 left-0 right-0 text-center text-[9px] text-slate-400 font-normal select-none pointer-events-none">
         This quotation is valid until the date mentioned above. Prices and availability are subject to re-confirmation.
       </div>
       <div className="absolute bottom-0 left-0 right-0 h-7 bg-[#0b5c53] text-white flex items-center justify-between px-6 text-[9.5px] font-medium tracking-tight">
         <div className="flex items-center gap-3">
+          <span className="font-bold tracking-wide uppercase">{cleanName}</span>
+          <span className="text-white/40">|</span>
           {company.website && <span>{company.website}</span>}
           {company.website && company.phone && <span className="text-white/40">|</span>}
           {company.phone && <span>Ph: {company.phone}</span>}
@@ -1406,6 +1948,29 @@ function CompanyLogo({
   );
 }
 
+function PdfFieldRow({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-[86px_minmax(0,1fr)] gap-x-2 items-start">
+      <span className="text-slate-500 font-medium text-[11px] leading-5">{label}</span>
+      <span
+        className={`text-right text-[11px] leading-5 break-words ${
+          strong ? "font-black text-[#0f2942]" : "font-bold text-slate-800"
+        }`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function QuotationHeaderMini({
   company,
   quotationRef,
@@ -1420,37 +1985,42 @@ function QuotationHeaderMini({
   const cleanCompanyName = (company.name || "TRAVEL QUOTATION").replace(/^\.+/, "").trim();
 
   return (
-    <div className="flex items-center justify-between pb-2.5 border-b border-slate-200">
-      <div className="flex items-center gap-3.5">
-        <CompanyLogo
-          logo={company.logo}
-          name={cleanCompanyName}
-          className="h-11 w-auto object-contain max-w-[130px] shrink-0"
-        />
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 items-start pb-2.5 border-b border-slate-200">
+      <CompanyLogo
+        logo={company.logo}
+        name={cleanCompanyName}
+        className="h-11 w-auto object-contain max-w-[130px] shrink-0"
+      />
 
-        <div className="space-y-0.5 text-xs text-slate-500">
-          <h2 className="text-base font-black tracking-wide uppercase text-[#1e3a8a] leading-tight">
+      <div className="min-w-0 space-y-1 text-xs text-slate-500">
+        {!company.logo && (
+          <h2 className="text-base font-black uppercase text-[#1e3a8a] leading-5">
             {cleanCompanyName}
           </h2>
-          {company.website && <p className="text-[10.5px] text-slate-500 leading-tight">{company.website}</p>}
-          {company.address && <p className="text-[10.5px] text-slate-500 leading-tight">{company.address}</p>}
-          {(company.phone || company.email) && (
-            <p className="text-[10.5px] text-slate-500 leading-tight">
-              {[company.phone, company.email].filter(Boolean).join(" | ")}
-            </p>
-          )}
-        </div>
+        )}
+        {company.website && (
+          <p className="text-[11px] text-slate-500 leading-5 break-words">{company.website}</p>
+        )}
+        {company.address && (
+          <p className="text-[11px] text-slate-500 leading-5 break-words">{company.address}</p>
+        )}
+        {company.phone && (
+          <p className="text-[11px] text-slate-500 leading-5 break-words">{company.phone}</p>
+        )}
+        {company.email && (
+          <p className="text-[11px] text-slate-500 leading-5 break-all">{company.email}</p>
+        )}
       </div>
 
-      <div className="text-right text-xs space-y-0.5 text-slate-600">
-        <p className="text-[10.5px] uppercase font-bold tracking-wider text-slate-400">QUOTATION</p>
-        <p className="font-bold text-slate-900 text-[11px]">
+      <div className="text-right space-y-1 text-slate-600 shrink-0 w-[128px]">
+        <p className="text-[11px] uppercase font-bold text-slate-400 leading-5">QUOTATION</p>
+        <p className="font-bold text-slate-900 text-[11px] leading-5 break-words">
           Ref: <span className="font-medium text-slate-700">{quotationRef}</span>
         </p>
-        <p className="font-bold text-slate-900 text-[11px]">
+        <p className="font-bold text-slate-900 text-[11px] leading-5">
           Date: <span className="font-medium text-slate-700">{quotationDate}</span>
         </p>
-        <p className="font-bold text-slate-900 text-[11px]">
+        <p className="font-bold text-slate-900 text-[11px] leading-5">
           Valid: <span className="font-medium text-slate-700">{validUntilDate}</span>
         </p>
       </div>
@@ -1462,6 +2032,92 @@ function getOrdinalSuffix(n: number) {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;
   return s[(v - 20) % 10] || s[v] || s[0];
+}
+
+function IataMemberBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-1">
+      <svg className="w-5 h-5 text-[#0f2942]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L14.5 7.5L20 8.3L16 12.2L16.9 17.7L12 15.1L7.1 17.7L8 12.2L4 8.3L9.5 7.5L12 2Z" />
+      </svg>
+      <span className="text-[7.5px] font-bold text-slate-700 uppercase tracking-tighter mt-1 leading-tight">
+        IATA MEMBER
+      </span>
+    </div>
+  );
+}
+
+function AnoMemberBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-1">
+      <svg className="w-5 h-5 text-[#0f2942]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8 12h3l2 2h3" />
+        <path d="M11 9l2 2" />
+      </svg>
+      <span className="text-[7.5px] font-bold text-slate-700 uppercase tracking-tighter mt-1 leading-tight">
+        ANO MEMBER
+      </span>
+    </div>
+  );
+}
+
+function TripAdvisorBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-1">
+      <svg className="w-5 h-5 text-[#0f2942]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <circle cx="7.5" cy="13" r="3.5" />
+        <circle cx="16.5" cy="13" r="3.5" />
+        <circle cx="7.5" cy="13" r="1.3" fill="currentColor" />
+        <circle cx="16.5" cy="13" r="1.3" fill="currentColor" />
+        <path d="M12 11V7.5" strokeLinecap="round" />
+        <path d="M7.5 6C10 6 11 7 12 7.5C13 7 14 6 16.5 6" strokeLinecap="round" />
+      </svg>
+      <span className="text-[7.5px] font-bold text-slate-700 lowercase tracking-tight mt-1 leading-tight">
+        tripadvisor
+      </span>
+    </div>
+  );
+}
+
+function TaapMemberBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-1">
+      <svg className="w-5 h-5 text-[#0f2942]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 19h20M2 17h20M4 17V8a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v9M12 13h8a2 2 0 0 1 2 2v2" />
+      </svg>
+      <span className="text-[7.5px] font-bold text-slate-700 uppercase tracking-tighter mt-1 leading-tight">
+        TAAP MEMBER
+      </span>
+    </div>
+  );
+}
+
+function AtoaiCarBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-1">
+      <svg className="w-5 h-5 text-[#0f2942]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 17h14M5 17a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2M5 17a2 2 0 1 0 4 0M15 17a2 2 0 1 0 4 0M7 7l2-3h6l2 3" />
+      </svg>
+      <span className="text-[7.5px] font-bold text-slate-700 uppercase tracking-tighter mt-1 leading-tight">
+        ATOAI MEMBER
+      </span>
+    </div>
+  );
+}
+
+function AtoaiMountainBadge() {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-1">
+      <svg className="w-5 h-5 text-[#0f2942]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8 15L11.5 9.5L14 13L15.5 11L18 15H8Z" />
+      </svg>
+      <span className="text-[7.5px] font-bold text-slate-700 uppercase tracking-tighter mt-1 leading-tight">
+        ATOAI MEMBER
+      </span>
+    </div>
+  );
 }
 
 function MotBadge() {

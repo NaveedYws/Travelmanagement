@@ -310,6 +310,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
 
   // 11. Quotation Settings & Policies (WITHOUT AGENT PRICE)
   const [selectedTheme, setSelectedTheme] = useState<string>("teal");
+  const [includeCoverPage, setIncludeCoverPage] = useState<boolean>(false);
   const [gstRate, setGstRate] = useState<number>(5); // 5% GST
   const [tcsRate, setTcsRate] = useState<number>(0); // 0%
   const [discountAmount, setDiscountAmount] = useState<number>(0);
@@ -328,7 +329,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     if (showPreview) {
       if (typeof window !== "undefined") {
         if (window.innerWidth < 640) {
-          setPreviewZoom(55);
+          setPreviewZoom(Math.max(35, Math.floor(((window.innerWidth - 32) / 794) * 100)));
         } else if (window.innerWidth < 1024) {
           setPreviewZoom(75);
         } else {
@@ -815,6 +816,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       children,
       theme,
       colorTheme: selectedTheme,
+      includeCoverPage,
       subTotal,
       discountAmount,
       discountPercent: discountAmount && subTotal ? Math.round((discountAmount / subTotal) * 100) : 10,
@@ -852,6 +854,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       children,
       theme,
       selectedTheme,
+      includeCoverPage,
       subTotal,
       discountAmount,
       gstAmount,
@@ -994,20 +997,49 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
           currentBatch.map(async (page, offset) => {
             const pageIndex = batchStart + offset;
             const canvas = await html2canvas(page, {
-              scale: 1.6, // High-DPI 160 DPI output: razor-sharp typography, ~50% faster than 2.2
+              scale: 2.5, // ~240 DPI: sharp enough to read on phone screens when zoomed
               useCORS: true,
               logging: false,
               backgroundColor: "#ffffff",
-              width: page.offsetWidth || 794,
-              height: page.offsetHeight || 1123,
+              width: 794,
+              height: 1123,
               windowWidth: 794,
+              windowHeight: 1123,
+              x: 0,
+              y: 0,
+              scrollX: 0,
+              scrollY: 0,
               removeContainer: true,
-              imageTimeout: 2000,
+              imageTimeout: 3000,
+              onclone: (_clonedDoc, clonedElem) => {
+                clonedElem.style.width = "794px";
+                clonedElem.style.minWidth = "794px";
+                clonedElem.style.maxWidth = "794px";
+                clonedElem.style.height = "1123px";
+                clonedElem.style.minHeight = "1123px";
+                clonedElem.style.maxHeight = "1123px";
+                clonedElem.style.boxSizing = "border-box";
+                clonedElem.style.margin = "0";
+                clonedElem.style.opacity = "1";
+                clonedElem.style.visibility = "visible";
+                clonedElem.style.transform = "none";
+                clonedElem.style.letterSpacing = "normal";
+
+                clonedElem.querySelectorAll<HTMLElement>("*").forEach((el) => {
+                  el.style.letterSpacing = "normal";
+                  el.style.opacity = "1";
+                  if (el.classList.contains("truncate")) {
+                    el.style.textOverflow = "clip";
+                    el.style.overflow = "visible";
+                    el.style.whiteSpace = "normal";
+                  }
+                });
+              },
             });
 
             return {
               index: pageIndex,
-              dataUrl: canvas.toDataURL("image/jpeg", 0.88),
+              dataUrl: canvas.toDataURL("image/jpeg", 0.92),
             };
           })
         );
@@ -1023,9 +1055,21 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
         pdf.addImage(renderedCanvases[i].dataUrl, "JPEG", 0, 0, 210, 297, undefined, "FAST");
       }
 
+      // Set PDF Document Metadata & Viewer Preferences (forces standard Print Layout in PDF viewers)
+      pdf.setProperties({
+        title: `${tripTitle || "Travel Quotation"} - ${clientName || "Valued Client"}`,
+        subject: `Quotation Ref: ${quotationRef}`,
+        author: (user?.company_name || "Travel Partner").replace(/^\.+/, "").trim(),
+        creator: "ProductHub Itinerary Engine",
+      });
+      pdf.setDisplayMode("fullpage", "continuous", "UseNone");
+
       const filename = `${(clientName || "Quotation").replace(/\s+/g, "_")}_${(tripTitle || "Itinerary").slice(0, 30).replace(/\s+/g, "_")}.pdf`;
       pdf.save(filename);
-      toast.success("Quotation PDF downloaded!", { id: toastId });
+      toast.success("Quotation PDF downloaded! (In mobile Office/Word, use 'Print Layout' mode)", { 
+        id: toastId,
+        duration: 5000,
+      });
       return filename;
     } catch (error) {
       console.error("PDF generation failed:", error);
@@ -3396,13 +3440,24 @@ Thank you for choosing ${user?.company_name || "us"}!`;
           </div>
         </ScrollArea>
 
-        {/* --- HIDDEN PDF RENDER ELEMENT (Mounted at 0,0 with opacity 0 to ensure immediate layout calculations and high-priority image fetching) --- */}
-        <div 
-          className="fixed top-0 left-0 pointer-events-none opacity-0 -z-50 overflow-hidden" 
-          style={{ width: "210mm", height: "auto" }} 
+        {/* --- HIDDEN PDF RENDER ELEMENT (Mounted at 0,0 with fixed 794px / 210mm dimensions to guarantee desktop A4 calculation on mobile) --- */}
+        <div
+          className="fixed pointer-events-none"
+          style={{
+            left: "-12000px",
+            top: 0,
+            width: "794px",
+            minWidth: "794px",
+            maxWidth: "794px",
+            height: "auto",
+            boxSizing: "border-box",
+            opacity: 1,
+            visibility: "visible",
+            zIndex: -1,
+          }}
           aria-hidden
         >
-          <div ref={pdfRef} style={{ width: "210mm" }}>
+          <div ref={pdfRef} style={{ width: "794px", minWidth: "794px", maxWidth: "794px", boxSizing: "border-box" }}>
             <ItineraryPdfDocument data={pdfData} user={user} />
           </div>
         </div>
@@ -3460,7 +3515,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                 variant="ghost"
                 onClick={() => {
                   const containerW = typeof window !== "undefined" ? window.innerWidth : 1024;
-                  if (containerW < 640) setPreviewZoom(55);
+                  if (containerW < 640) setPreviewZoom(Math.max(35, Math.floor(((containerW - 32) / 794) * 100)));
                   else if (containerW < 1024) setPreviewZoom(75);
                   else setPreviewZoom(95);
                 }}

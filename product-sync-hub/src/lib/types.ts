@@ -15,6 +15,7 @@ export interface User {
   bank_account_no?: string;
   bank_ifsc?: string;
   bank_upi_id?: string;
+  bank_qr?: string;
   created_at?: string;
 }
 
