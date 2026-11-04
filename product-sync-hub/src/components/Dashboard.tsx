@@ -16,6 +16,7 @@ import { AdminUsers } from "./AdminUsers";
 import { BulkImport } from "./BulkImport";
 import { ItineraryMaker } from "./ItineraryMaker";
 import { DestinationManager } from "./DestinationManager";
+import { HotelManager } from "./HotelManager";
 import { CompanyProfileSettings } from "./CompanyProfileSettings";
 import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -80,7 +81,7 @@ export function Dashboard() {
   const { blogs, addBlog } = useBlogs(user?.id);
 
   const activeInquiryCount = inquiries.filter((i) => i.status === "new" || i.status === "contacted").length;
-  const [activeView, setActiveView] = useState<"dashboard" | "manage" | "blogs" | "inquiries" | "destinations" | "settings" | "admin">("dashboard");
+  const [activeView, setActiveView] = useState<"dashboard" | "manage" | "blogs" | "inquiries" | "destinations" | "hotels" | "settings" | "admin">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -221,6 +222,7 @@ export function Dashboard() {
       items: [
         { id: "manage" as const, label: "Manage Packages", icon: Layers, count: products.length },
         { id: "destinations" as const, label: "Destinations", icon: MapPin },
+        { id: "hotels" as const, label: "Hotels", icon: Hotel },
         { id: "blogs" as const, label: "Manage Blogs", icon: FileText, count: blogs.length },
       ]
     },
@@ -586,6 +588,24 @@ export function Dashboard() {
                       }
                     />
 
+                    {/* Item 4b: Hotels Library */}
+                    <HotelManager
+                      trigger={
+                        <div className="w-full flex items-center justify-between p-2.5 sm:p-3 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all text-left cursor-pointer group">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center shrink-0">
+                              <Hotel className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-teal-600 dark:group-hover:text-teal-400">Hotels</p>
+                              <p className="text-[11px] text-slate-400 truncate">Rooms & Photos</p>
+                            </div>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                        </div>
+                      }
+                    />
+
                     {/* Item 5: Bulk Import via CSV */}
                     <BulkImport
                       onImport={handleBulkImport}
@@ -708,6 +728,9 @@ export function Dashboard() {
 
       case "destinations":
         return <DestinationManager inline />;
+
+      case "hotels":
+        return <HotelManager inline />;
 
       case "inquiries":
         return <InquiryDashboard />;

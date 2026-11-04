@@ -75,6 +75,11 @@ import {
   saveDestination,
 } from "@/lib/destinationStorage";
 import { DestinationManager } from "./DestinationManager";
+import {
+  HotelItem,
+  getStoredHotels,
+} from "@/lib/hotelStorage";
+import { HotelManager } from "./HotelManager";
 
 const COLOR_THEMES = [
   { id: "teal", name: "Teal Modern", color: "#0f766e", ring: "ring-teal-500", bg: "bg-teal-600" },
@@ -199,7 +204,9 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     return Array.from(set);
   }, [destLibrary]);
 
-  // 4. Hotels (Blank clean start)
+  // 4. Hotels (Pre-saved library + Blank clean start)
+  const [savedHotels, setSavedHotels] = useState<HotelItem[]>([]);
+  const [selectedSavedHotelId, setSelectedSavedHotelId] = useState<string>("");
   const [hotels, setHotels] = useState<ItineraryHotel[]>([]);
   const [editingHotelIndex, setEditingHotelIndex] = useState<number | null>(null);
   const [isUploadingHotelImage, setIsUploadingHotelImage] = useState(false);
@@ -218,6 +225,26 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     amenities: "",
     imageUrl: "",
   });
+
+  useEffect(() => {
+    const loadHotels = () => {
+      const items = getStoredHotels();
+      setSavedHotels(items);
+    };
+    loadHotels();
+    window.addEventListener("hotel_library_updated", loadHotels);
+    return () => window.removeEventListener("hotel_library_updated", loadHotels);
+  }, []);
+
+  const matchedHotelRooms = useMemo(() => {
+    if (!hotelForm.hotelName || selectedSavedHotelId === "manual") return [];
+    const found = savedHotels.find(
+      (h) =>
+        h.id === selectedSavedHotelId ||
+        h.name.toLowerCase().trim() === hotelForm.hotelName.toLowerCase().trim()
+    );
+    return found?.rooms || [];
+  }, [hotelForm.hotelName, selectedSavedHotelId, savedHotels]);
 
   // 5. Transports (Blank clean start)
   const [transports, setTransports] = useState<ItineraryTransport[]>([]);
@@ -693,6 +720,51 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     });
   };
 
+  const handleSelectSavedHotel = (hotelId: string) => {
+    setSelectedSavedHotelId(hotelId);
+    if (!hotelId || hotelId === "manual") {
+      if (hotelId === "manual") {
+        setHotelForm((prev) => ({
+          ...prev,
+          hotelName: "",
+          location: destination || "",
+          roomCategory: "Deluxe Room",
+          mealPlan: "CP (Breakfast Included)",
+          starRating: "3 Star",
+          ratePerNight: 0,
+          price: 0,
+          amenities: "",
+          imageUrl: "",
+        }));
+        toast.info("Manual Entry: Enter your custom hotel details below");
+      }
+      return;
+    }
+
+    const matched = savedHotels.find((h) => h.id === hotelId);
+    if (!matched) return;
+
+    const chosenRoom = matched.rooms && matched.rooms.length > 0 ? matched.rooms[0] : (hotelForm.roomCategory || "Deluxe Room");
+    const rate = matched.defaultRatePerNight || hotelForm.ratePerNight || 0;
+    const n = hotelForm.nights || 1;
+    const r = hotelForm.rooms || 1;
+    const autoPrice = rate > 0 ? rate * n * r : hotelForm.price;
+
+    setHotelForm((prev) => ({
+      ...prev,
+      hotelName: matched.name,
+      location: matched.city,
+      roomCategory: chosenRoom,
+      mealPlan: matched.defaultMealPlan || prev.mealPlan || "CP (Breakfast Included)",
+      starRating: matched.starRating || prev.starRating || "3 Star",
+      ratePerNight: rate,
+      price: autoPrice,
+      amenities: matched.amenities || prev.amenities,
+      imageUrl: matched.imageUrl || prev.imageUrl,
+    }));
+    toast.success(`Selected ${matched.name} (${matched.city})`);
+  };
+
   // Hotel handlers
   const handleSaveHotel = () => {
     if (!hotelForm.hotelName.trim()) {
@@ -722,6 +794,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       setHotels([...hotels, { ...savedHotel, id: `h-${Date.now()}` }]);
       toast.success("Hotel added");
     }
+    setSelectedSavedHotelId("");
     setHotelForm({
       hotelName: "",
       location: destination || "",
@@ -745,6 +818,8 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     const n = h.nights || calculateHotelNights(h.checkIn, h.checkOut);
     const r = h.rooms || 1;
     const rate = h.ratePerNight || (h.price ? Math.round(h.price / (n * r)) : 0);
+    const matched = savedHotels.find((sh) => sh.name.toLowerCase() === h.hotelName.toLowerCase());
+    setSelectedSavedHotelId(matched ? matched.id : "");
     setHotelForm({
       ...h,
       nights: n,
@@ -1995,42 +2070,184 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       )}
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label className="text-[11px] font-bold text-slate-600">Search Hotel</Label>
-                      <Input
-                        placeholder="Search Hotel by name..."
-                        value={hotelForm.hotelName}
-                        onChange={(e) => setHotelForm({ ...hotelForm, hotelName: e.target.value })}
-                        className="h-10 bg-white"
-                      />
+                    {/* Select Hotel from Library Dropdown or Enter Manually */}
+                    <div className="p-3 bg-gradient-to-r from-teal-50/90 to-blue-50/70 border border-teal-200/90 rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs font-bold text-teal-900 flex items-center gap-1.5">
+                            <Hotel className="w-4 h-4 text-teal-700" />
+                            Select Hotel
+                          </Label>
+
+                          {/* Quick Toggle: Library vs Manual */}
+                          <div className="inline-flex rounded-lg p-0.5 bg-white border border-teal-200 shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (selectedSavedHotelId === "manual") {
+                                  setSelectedSavedHotelId("");
+                                }
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all inline-flex items-center gap-1.5 ${
+                                selectedSavedHotelId !== "manual"
+                                  ? "bg-teal-700 text-white shadow-xs"
+                                  : "text-slate-600 hover:text-teal-800"
+                              }`}
+                            >
+                              <Hotel className="w-3 h-3" />
+                              From Library
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectSavedHotel("manual")}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all inline-flex items-center gap-1.5 ${
+                                selectedSavedHotelId === "manual"
+                                  ? "bg-teal-700 text-white shadow-xs"
+                                  : "text-slate-600 hover:text-teal-800"
+                              }`}
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              Enter Manually
+                            </button>
+                          </div>
+                        </div>
+
+                        <HotelManager
+                          trigger={
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2.5 text-[11px] font-bold text-teal-800 bg-white border-teal-300 hover:bg-teal-100/70 shadow-2xs gap-1"
+                            >
+                              <Plus className="w-3 h-3 text-teal-700" />
+                              Manage Hotels
+                            </Button>
+                          }
+                        />
+                      </div>
+
+                      <select
+                        value={selectedSavedHotelId}
+                        onChange={(e) => handleSelectSavedHotel(e.target.value)}
+                        className="w-full h-10 rounded-lg border border-teal-300 bg-white px-3 text-xs font-medium text-slate-800 shadow-2xs focus:ring-2 focus:ring-teal-500 focus:outline-hidden"
+                      >
+                        <option value="">-- Choose Hotel from Library --</option>
+                        <option value="manual">Enter Manually (Custom Hotel)</option>
+                        {savedHotels.length > 0 && (
+                          <optgroup label="Saved Hotel Library">
+                            {savedHotels.map((h) => (
+                              <option key={h.id} value={h.id}>
+                                {h.name} — {h.city} ({h.starRating || "Hotel"}) · Rooms: {h.rooms.join(", ")}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+
+                      {selectedSavedHotelId === "manual" && (
+                        <div className="flex items-center gap-2 text-[11px] font-medium text-teal-900 bg-teal-100/70 px-2.5 py-1.5 rounded-md border border-teal-200">
+                          <Edit2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                          <span>Manual Entry Mode active: Fill in custom hotel name, city, room category, and photo below.</span>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-bold text-slate-600">Hotel Name</Label>
+                        <Input
+                          placeholder="e.g. Hotel Arco Srinagar"
+                          value={hotelForm.hotelName}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setHotelForm((prev) => ({ ...prev, hotelName: val }));
+                            if (selectedSavedHotelId && selectedSavedHotelId !== "manual") {
+                              const matched = savedHotels.find((h) => h.id === selectedSavedHotelId);
+                              if (matched && matched.name !== val) {
+                                setSelectedSavedHotelId("manual");
+                              }
+                            }
+                          }}
+                          className="h-10 bg-white text-xs font-semibold"
+                        />
+                      </div>
                       <div className="space-y-1">
                         <Label className="text-[11px] font-bold text-slate-600">City / Location</Label>
                         <Input
-                          placeholder="e.g. City / Area"
+                          placeholder="e.g. Srinagar, Katra, Pahalgam"
                           value={hotelForm.location}
                           onChange={(e) => setHotelForm({ ...hotelForm, location: e.target.value })}
-                          className="h-10 bg-white"
+                          className="h-10 bg-white text-xs"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-[11px] font-bold text-slate-600">Room Category</Label>
-                        <Input
-                          placeholder="Deluxe Room / Suite"
-                          value={hotelForm.roomCategory}
-                          onChange={(e) => setHotelForm({ ...hotelForm, roomCategory: e.target.value })}
-                          className="h-10 bg-white"
-                        />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="space-y-1 sm:col-span-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-[11px] font-bold text-slate-600">Room Category</Label>
+                          {matchedHotelRooms.length > 0 && (
+                            <span className="text-[10px] text-teal-700 font-semibold">
+                              {matchedHotelRooms.length} room types available
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          {matchedHotelRooms.length > 0 && (
+                            <select
+                              value={matchedHotelRooms.includes(hotelForm.roomCategory) ? hotelForm.roomCategory : ""}
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  setHotelForm({ ...hotelForm, roomCategory: e.target.value });
+                                }
+                              }}
+                              className="h-10 rounded-lg border border-slate-200 bg-teal-50/50 px-2.5 text-xs font-semibold text-teal-900 max-w-[170px] shrink-0"
+                            >
+                              <option value="">Select Room...</option>
+                              {matchedHotelRooms.map((rm, idx) => (
+                                <option key={idx} value={rm}>
+                                  {rm}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <Input
+                            placeholder="Deluxe Room / Suite"
+                            value={hotelForm.roomCategory}
+                            onChange={(e) => setHotelForm({ ...hotelForm, roomCategory: e.target.value })}
+                            className="h-10 bg-white text-xs flex-1"
+                          />
+                        </div>
+
+                        {matchedHotelRooms.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <span className="text-[10px] text-slate-400">Quick Pick:</span>
+                            {matchedHotelRooms.map((rm, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setHotelForm({ ...hotelForm, roomCategory: rm })}
+                                className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
+                                  hotelForm.roomCategory === rm
+                                    ? "bg-teal-700 text-white border-teal-700 shadow-2xs"
+                                    : "bg-white text-slate-700 border-slate-200 hover:border-teal-400 hover:bg-teal-50"
+                                }`}
+                              >
+                                {rm}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
+
                       <div className="space-y-1">
                         <Label className="text-[11px] font-bold text-slate-600">Meal Plan</Label>
                         <Input
                           placeholder="MAP / CP / EP / AP"
                           value={hotelForm.mealPlan}
                           onChange={(e) => setHotelForm({ ...hotelForm, mealPlan: e.target.value })}
-                          className="h-10 bg-white"
+                          className="h-10 bg-white text-xs"
                         />
                       </div>
                     </div>
