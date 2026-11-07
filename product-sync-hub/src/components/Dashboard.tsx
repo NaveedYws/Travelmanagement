@@ -868,7 +868,7 @@ export function Dashboard() {
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold text-white tracking-tight leading-tight">ProductHub</span>
+                <span className="text-sm font-bold text-white tracking-tight leading-tight">Trip Flow</span>
                 <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-blue-600 text-white shadow-xs">PRO</span>
               </div>
               <span className="text-[10px] text-slate-400 font-medium">Travel Agency & CRM</span>

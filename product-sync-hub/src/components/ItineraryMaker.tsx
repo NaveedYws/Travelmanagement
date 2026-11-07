@@ -1135,7 +1135,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
         title: `${tripTitle || "Travel Quotation"} - ${clientName || "Valued Client"}`,
         subject: `Quotation Ref: ${quotationRef}`,
         author: (user?.company_name || "Travel Partner").replace(/^\.+/, "").trim(),
-        creator: "ProductHub Itinerary Engine",
+        creator: "Trip Flow Itinerary Engine",
       });
       pdf.setDisplayMode("fullpage", "continuous", "UseNone");
 

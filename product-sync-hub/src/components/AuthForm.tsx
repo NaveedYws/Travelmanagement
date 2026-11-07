@@ -70,7 +70,7 @@ export function AuthForm() {
               Manage your business with <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">Precision.</span>
             </h1>
             <p className="text-lg text-slate-400 leading-relaxed">
-              Product Hub is the all-in-one platform for travel agencies, hotels, and online stores to sync, track, and scale operations effortlessly.
+              Trip Flow is the all-in-one platform for travel agencies, hotels, and online stores to sync, track, and scale operations effortlessly.
             </p>
           </div>
 
@@ -228,7 +228,7 @@ export function AuthForm() {
           </Card>
 
           <div className="text-center text-xs text-slate-400">
-            &copy; 2026 Product Hub Inc. All rights reserved.
+            &copy; 2026 Trip Flow Inc. All rights reserved.
           </div>
         </div>
       </div>
