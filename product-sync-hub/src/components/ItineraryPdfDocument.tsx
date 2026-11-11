@@ -23,6 +23,9 @@ export interface ItineraryPdfData {
   endDate: string;
   adults: string;
   children: string;
+  infants?: string;
+  rooms?: string;
+  mealPlan?: string;
   theme: string;
   colorTheme?: string;
   templateStyle?: "editorial" | "executive" | "modern";
@@ -46,6 +49,7 @@ export interface ItineraryPdfData {
   duration: string;
   dateRange: string;
   guestPhotos?: string[];
+  routePlan?: string | string[];
 }
 
 interface ItineraryPdfDocumentProps {
@@ -206,11 +210,11 @@ export interface ContentPagePlan {
   days?: {
     list: DetailedItineraryDay[];
     partTitle: string;
-    compact: boolean;
   };
   hotels?: {
     list: ItineraryHotel[];
-    compact: boolean;
+    startNight?: number;
+    totalHotels?: number;
   };
   transports?: {
     list: ItineraryTransport[];
@@ -233,11 +237,224 @@ export interface ContentPagePlan {
 
 // Smart page planner that packs days, hotels, vehicles, policies, and payment
 // without unnecessary empty spaces or orphaned items on pages
-function estimateDayHeight(day: DetailedItineraryDay, compact: boolean): number {
+function estimateDayHeight(day: DetailedItineraryDay): number {
+  const hasPhoto = Boolean(day.images?.[0]);
+  const cleanTitle =
+    (day.title || "")
+      .replace(/^(?:day\s*\d+\s*[:\-–—]*\s*)+/i, "")
+      .replace(/^[:\-–—\s]+/, "")
+      .trim() || "Tour & Sightseeing";
+  const titleLines = Math.max(1, Math.ceil((cleanTitle.length + 8) / 72));
+  const titleHeight = titleLines * 4.9;
+
+  const charsPerLine = hasPhoto ? 74 : 102;
   const points = parseDayPoints(day.description, day.activities, day.title);
-  const bulletCount = points.length;
-  const contentH = Math.max(bulletCount * (compact ? 4.5 : 5.4), compact ? 28 : 34);
-  return 13 + contentH + (day.highlights && day.highlights.length > 0 ? 5.5 : 0);
+  const bulletsHeight = points.reduce((sum, pt, idx) => {
+    const lines = Math.max(1, Math.ceil(pt.length / charsPerLine));
+    return sum + lines * 5.25 + (idx > 0 ? 0.53 : 0);
+  }, 0);
+
+  const photoH = hasPhoto ? 28.5 : 0;
+  const contentH = Math.max(bulletsHeight, photoH);
+
+  const highlightsText =
+    day.highlights && day.highlights.length > 0 ? day.highlights.join(", ") : "";
+  const highlightsLines = highlightsText
+    ? Math.max(1, Math.ceil((highlightsText.length + 12) / charsPerLine))
+    : 0;
+  const highlightsH = highlightsLines > 0 ? 2.5 + highlightsLines * 4.2 : 0;
+
+  return 10.8 + titleHeight + contentH + highlightsH;
+}
+
+const ROUTE_KNOWN_PLACES = [
+  "Srinagar Airport", "Srinagar", "Gulmarg", "Pahalgam", "Sonmarg", "Doodhpathri", "Yusmarg",
+  "Jammu Airport", "Jammu Railway Station", "Jammu", "Katra", "Vaishno Devi", "Patnitop",
+  "Leh Airport", "Leh", "Nubra Valley", "Nubra", "Pangong Tso", "Pangong", "Sham Valley", "Kargil",
+  "Manali", "Shimla", "Kufri", "Solang Valley", "Dharamshala", "Dalhousie", "Amritsar", "Delhi Airport", "Delhi", "Agra", "Jaipur",
+  "Cochin Airport", "Cochin", "Munnar", "Thekkady", "Alleppey", "Kovalam", "Goa", "Port Blair", "Havelock",
+  "Dubai", "Bali", "Ubud", "Kuta", "Nusa Penida", "Bangkok", "Phuket", "Pattaya", "Singapore", "Maldives"
+];
+
+export function extractRouteFromItinerary(
+  days: DetailedItineraryDay[],
+  transports?: ItineraryTransport[],
+  fallbackDestination?: string
+): string[] {
+  // 1. If transports has a structured route with arrows
+  if (transports && transports.length > 0) {
+    for (const t of transports) {
+      if (t.route && (t.route.includes("→") || t.route.includes("->") || t.route.includes("-->"))) {
+        const parts = t.route.split(/→|->|-->/).map((s) => s.trim()).filter(Boolean);
+        if (parts.length >= 2) return parts;
+      }
+    }
+  }
+
+  if (!days || days.length === 0) {
+    if (fallbackDestination) {
+      const clean = fallbackDestination.replace(/tour|package|trip|confirmed/gi, "").trim();
+      return clean ? [clean] : [];
+    }
+    return [];
+  }
+
+  const findPlace = (text?: string): string | null => {
+    if (!text) return null;
+    const lower = text.toLowerCase();
+    for (const p of ROUTE_KNOWN_PLACES) {
+      const regex = new RegExp(`\\b${p.toLowerCase().replace(/\\s+/g, "\\s+")}\\b`, "i");
+      if (regex.test(lower)) return p;
+    }
+    return null;
+  };
+
+  const stops: string[] = [];
+
+  days.forEach((day, idx) => {
+    const isFirst = idx === 0;
+    const isLast = idx === days.length - 1;
+    const textAll = `${day.destination || ""} ${day.title || ""} ${day.description || ""}`;
+
+    // For Day 1, check if airport arrival
+    if (isFirst) {
+      if (/airport/i.test(textAll)) {
+        const place = findPlace(textAll);
+        if (place && !place.toLowerCase().includes("airport")) {
+          stops.push(`${place} Airport`);
+        } else if (place) {
+          stops.push(place);
+        } else {
+          stops.push(day.destination || "Airport");
+        }
+
+        // Also check if day 1 transfers to another city (e.g. Jammu to Katra)
+        if (/transfer to|drive to|proceed to/i.test(day.title || "")) {
+          const destMatch = (day.title || "").match(/(?:transfer|drive|proceed)\s+to\s+([A-Za-z\s]+?)(?:&|\/|–|-|$)/i);
+          if (destMatch && destMatch[1]) {
+            const destClean = destMatch[1].trim();
+            const known = findPlace(destClean) || destClean;
+            if (known && known !== stops[stops.length - 1]) stops.push(known);
+          }
+        }
+        return;
+      }
+    }
+
+    // Try finding place from destination field first
+    let place = findPlace(day.destination);
+    if (!place) {
+      if (day.destination && day.destination.trim()) {
+        const clean = day.destination
+          .replace(/departure|arrival|excursion|tour|sightseeing/gi, "")
+          .trim();
+        if (clean) place = findPlace(clean) || clean;
+      }
+    }
+
+    // If still not found, check title
+    if (!place && !isLast) {
+      place = findPlace(day.title);
+    }
+
+    // Check if excursion returning to base (e.g. "Day Excursion to Gulmarg")
+    const isExcursion = /excursion|day trip|visit to/i.test(day.title || "");
+
+    if (place) {
+      const lastStop = stops[stops.length - 1];
+      if (lastStop !== place) {
+        stops.push(place);
+      }
+
+      // If excursion from base hub, return to base hub if stays in base hub
+      if (isExcursion && idx < days.length - 1) {
+        const baseHub = stops[0]?.replace(/\s+Airport$/, "");
+        if (baseHub && place !== baseHub) {
+          stops.push(baseHub);
+        }
+      }
+    }
+
+    // For last day, ensure departure hub is added if different from current last stop
+    if (isLast) {
+      const placeMatch = findPlace(textAll);
+      const cleanBase = placeMatch ? placeMatch.replace(/\s+Airport$/i, "") : "";
+      const last = stops[stops.length - 1] || "";
+      const cleanLast = last.replace(/\s+Airport$/i, "");
+      if (cleanBase && cleanLast !== cleanBase) {
+        stops.push(cleanBase);
+      }
+    }
+  });
+
+  // Final deduplication of consecutive duplicate stops
+  const finalStops: string[] = [];
+  for (let i = 0; i < stops.length; i++) {
+    if (i === 0 || stops[i] !== stops[i - 1]) {
+      finalStops.push(stops[i]);
+    }
+  }
+
+  if (finalStops.length >= 2) return finalStops;
+  if (fallbackDestination) {
+    const clean = fallbackDestination.replace(/tour|package|trip|confirmed/gi, "").trim();
+    if (clean) return [clean];
+  }
+  return finalStops;
+}
+
+export function renderRouteStopIcon(stop: string) {
+  const s = stop.toLowerCase();
+  if (/airport|flight/i.test(s)) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-sky-600 shrink-0">
+        <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+      </svg>
+    );
+  }
+  if (/railway|train|station|tawi/i.test(s)) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-amber-600 shrink-0">
+        <rect width="16" height="16" x="4" y="3" rx="2" />
+        <path d="M4 11h16" />
+        <path d="M12 3v8" />
+        <path d="m8 19-2 3" />
+        <path d="m18 22-2-3" />
+        <circle cx="8" cy="15" r="1" />
+        <circle cx="16" cy="15" r="1" />
+      </svg>
+    );
+  }
+  if (/katra|vaishno|darshan|temple|amritsar|haridwar|rishikesh/i.test(s)) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-orange-600 shrink-0">
+        <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6a3 3 0 0 1 6 0v6" />
+        <circle cx="12" cy="7" r="1.5" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (/gulmarg|pahalgam|sonmarg|doodhpathri|yusmarg|gurez|sinthan|manali|shimla|kufri|solang|leh|nubra|pangong|ladakh|patnitop|kashmir/i.test(s)) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-emerald-600 shrink-0">
+        <path d="m8 3 4 8 5-5 5 15H2L8 3z" />
+      </svg>
+    );
+  }
+  if (/goa|havelock|kovalam|andaman|maldives|phuket|bali|beach/i.test(s)) {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-teal-600 shrink-0">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+      </svg>
+    );
+  }
+  // Default stylish map pin
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-sky-600 shrink-0">
+      <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
 }
 
 export function planContentPages({
@@ -259,41 +476,73 @@ export function planContentPages({
   hasPaymentDetails: boolean;
   clientNotes: string;
 }): ContentPagePlan[] {
-  // A4 page is 297mm. User wants only ~10% empty space at the bottom (~28mm buffer above footer).
-  const MAX_PAGE_HEIGHT = 268; // mm of usable vertical space per page (leaves only ~10% bottom space)
-  const TOP_CARD_HEIGHT = 56; // mm used on Page 1 by the Company Detail & Executive Summary Card + margins
-  const PAGE_1_USABLE_HEIGHT = MAX_PAGE_HEIGHT - TOP_CARD_HEIGHT; // ~212mm available on Page 1 for itinerary
+  // A4 page is 297mm. Reserve ~20mm at bottom (13mm validity + footer + 7mm clear buffer).
+  const MAX_PAGE_HEIGHT = 271; // mm of usable vertical space per page
+  const TOP_CARD_HEIGHT = 98; // Realistic height of Company Detail + Summary Card + Route Plan
+  const PAGE_1_USABLE_HEIGHT = MAX_PAGE_HEIGHT - TOP_CARD_HEIGHT; // ~173mm available on Page 1
   const MIN_SPACE_THRESHOLD = 28; // ~10% of page height. Continue sections on same page unless less than 10% remains!
   const pages: ContentPagePlan[] = [];
 
-  const getHotelsHeight = (count: number, compact: boolean) =>
-    count > 0 ? 8 + count * (compact ? 28 : 34) : 0;
+  const getHotelsHeight = (count: number) =>
+    count > 0 ? 10 + count * 39 : 0;
 
   const transportsHeight =
-    activeTransports.length > 0 ? 14 + activeTransports.length * 6.5 : 0;
-
-  const activitiesHeight =
-    activeActivities.length > 0 ? 14 + activeActivities.length * 6.5 : 0;
-
-  const incCount = Math.max(effectiveInclusions.length, effectiveExclusions.length);
-  const incExcHeight =
-    effectiveInclusions.length > 0 || effectiveExclusions.length > 0
-      ? 16 + Math.min(incCount, 8) * 3.5
+    activeTransports.length > 0
+      ? 16 +
+        activeTransports.reduce((sum, t) => {
+          const hasDates = Boolean(t.date || t.toDate || t.pickupTime);
+          const hasInclusions = Boolean(t.inclusions && t.inclusions.length > 0);
+          const extraLines = (hasDates ? 4 : 0) + (hasInclusions ? 4.5 : 0);
+          return sum + 8 + extraLines;
+        }, 0)
       : 0;
 
-  const getPoliciesHeight = () => (clientNotes ? 24 : 0);
-  const paymentHeight = hasPaymentDetails ? 70 : 0;
+  const activitiesHeight =
+    activeActivities.length > 0 ? 16 + activeActivities.length * 8 : 0;
+
+  const calcIncExcListHeight = (items: string[]) =>
+    items.reduce((sum, item) => sum + Math.max(1, Math.ceil(item.length / 44)) * 5.2 + 1.2, 0);
+  const incExcBodyHeight = Math.max(
+    calcIncExcListHeight(effectiveInclusions),
+    calcIncExcListHeight(effectiveExclusions),
+    8
+  );
+  const incExcHeight =
+    effectiveInclusions.length > 0 || effectiveExclusions.length > 0
+      ? 20 + incExcBodyHeight
+      : 0;
+
+  const getPoliciesHeight = () => {
+    if (!clientNotes) return 0;
+    const lines = clientNotes
+      .split(/\r?\n/)
+      .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.trim().length / 80)), 0);
+    return 14 + lines * 5.5;
+  };
+  const paymentHeight = hasPaymentDetails ? 135 : 0;
 
   let unplacedDays = [...activeDays];
   let unplacedHotels = [...activeHotels];
+  let nextHotelNight = 1;
   let transportsPlaced = activeTransports.length === 0;
   let activitiesPlaced = activeActivities.length === 0;
   let incExcPlaced = effectiveInclusions.length === 0 && effectiveExclusions.length === 0;
   let policiesPlaced = false;
   let paymentPlaced = !hasPaymentDetails;
 
+  const placeHotels = (page: ContentPagePlan, list: ItineraryHotel[]) => {
+    page.hotels = {
+      list,
+      startNight: nextHotelNight,
+      totalHotels: activeHotels.length,
+    };
+    nextHotelNight += list.reduce(
+      (sum, h) => sum + Math.max(1, Number(h.nights) || 1),
+      0
+    );
+  };
+
   let dayPartIndex = 1;
-  const willNeedMultipleDayParts = activeDays.length > 4;
 
   while (
     unplacedDays.length > 0 ||
@@ -308,104 +557,33 @@ export function planContentPages({
     const isFirstPage = pages.length === 0;
     let spaceLeft = isFirstPage ? PAGE_1_USABLE_HEIGHT : MAX_PAGE_HEIGHT;
 
-    // STEP 1: PLACE ITINERARY DAYS (Pack as many days as fit down to the 10% bottom margin!)
-    if (unplacedDays.length > 0) {
-      let daysToTake = unplacedDays.length;
-      let isCompact = isFirstPage ? daysToTake >= 4 : daysToTake >= 5;
-      let dHeight =
-        12 +
-        unplacedDays
-          .slice(0, daysToTake)
-          .reduce((sum, d) => sum + estimateDayHeight(d, isCompact), 0);
-
-      while (daysToTake > 1 && dHeight > spaceLeft) {
-        daysToTake--;
-        isCompact = isFirstPage ? daysToTake >= 4 : daysToTake >= 5;
-        dHeight =
-          12 +
-          unplacedDays
-            .slice(0, daysToTake)
-            .reduce((sum, d) => sum + estimateDayHeight(d, isCompact), 0);
-      }
-
-      const taken = unplacedDays.splice(0, daysToTake);
-      const partTitle = willNeedMultipleDayParts
-        ? `DETAILED DAY-WISE TOUR ITINERARY (PART ${dayPartIndex++})`
-        : "DETAILED DAY-WISE TOUR ITINERARY";
-
-      page.days = {
-        list: taken,
-        partTitle,
-        compact: isCompact,
-      };
-      spaceLeft -= dHeight;
-
-      // If more itinerary days still remain for subsequent pages, finish this page cleanly.
-      if (unplacedDays.length > 0) {
-        pages.push(page);
-        continue;
-      }
-    } else if (isFirstPage && unplacedHotels.length === 0 && transportsPlaced && activitiesPlaced && incExcPlaced && policiesPlaced && paymentPlaced) {
-      pages.push(page);
-      continue;
-    }
-
-    // 10% REMAINING SPACE RULE: If less than ~10% space remains, move to the next page
-    if (spaceLeft < MIN_SPACE_THRESHOLD) {
-      pages.push(page);
-      continue;
-    }
-
-    // STEP 2: PLACE HOTELS (Continue on same page if space permits!)
+    // STEP 1: PLACE HOTELS / ACCOMMODATION (Always prioritized first on Page 1)
     if (unplacedHotels.length > 0) {
-      const isCompactHotel = spaceLeft < 130 || unplacedHotels.length > 2;
-      const hHeight = getHotelsHeight(unplacedHotels.length, isCompactHotel);
+      const hHeight = getHotelsHeight(unplacedHotels.length);
 
       if (hHeight <= spaceLeft - 6) {
-        page.hotels = {
-          list: unplacedHotels,
-          compact: isCompactHotel,
-        };
+        placeHotels(page, unplacedHotels);
         spaceLeft -= hHeight;
         unplacedHotels = [];
-      } else if (page.days) {
-        // If this page already has days and hotels don't all fit:
-        // Try fitting as many hotels as possible, or if none fit move to next page
+      } else {
+        // Not all hotels fit: take as many as fit
         let countThatFit = 0;
         for (let i = unplacedHotels.length - 1; i >= 1; i--) {
-          if (getHotelsHeight(i, true) <= spaceLeft - 6) {
+          if (getHotelsHeight(i) <= spaceLeft - 6) {
             countThatFit = i;
             break;
           }
         }
         if (countThatFit > 0) {
           const taken = unplacedHotels.splice(0, countThatFit);
-          page.hotels = {
-            list: taken,
-            compact: true,
-          };
-          spaceLeft -= getHotelsHeight(countThatFit, true);
-        } else {
+          placeHotels(page, taken);
+          spaceLeft -= getHotelsHeight(countThatFit);
+          pages.push(page);
+          continue;
+        } else if (Object.keys(page).length > 0) {
           pages.push(page);
           continue;
         }
-      } else {
-        // Fresh page for hotels: take as many as fit
-        let countThatFit = 0;
-        for (let i = unplacedHotels.length; i >= 1; i--) {
-          if (getHotelsHeight(i, true) <= spaceLeft - 6) {
-            countThatFit = i;
-            break;
-          }
-        }
-        if (countThatFit > 0) {
-          const taken = unplacedHotels.splice(0, countThatFit);
-          page.hotels = {
-            list: taken,
-            compact: true,
-          };
-          spaceLeft -= getHotelsHeight(countThatFit, true);
-        }
       }
     }
 
@@ -415,24 +593,107 @@ export function planContentPages({
       continue;
     }
 
-    // STEP 3: PLACE TRANSPORTS & ACTIVITIES
+    // STEP 2: PLACE TRANSPORTS (Immediately following Accommodation)
     if (!transportsPlaced && activeTransports.length > 0) {
       if (transportsHeight <= spaceLeft - 6) {
         page.transports = { list: activeTransports };
         spaceLeft -= transportsHeight;
         transportsPlaced = true;
+      } else if (page.hotels) {
+        pages.push(page);
+        continue;
       }
     }
 
+    // If this page contains Accommodation or Transport, and a multi-day itinerary follows (unplacedDays.length > 1),
+    // finish this page so the Day-wise Itinerary starts cleanly together at the top of the next page!
+    if ((page.hotels || page.transports) && unplacedDays.length > 1) {
+      pages.push(page);
+      continue;
+    }
+
+    // 10% REMAINING SPACE RULE: If less than ~10% space remains, move to the next page
+    if (spaceLeft < MIN_SPACE_THRESHOLD) {
+      pages.push(page);
+      continue;
+    }
+
+    // STEP 3: PLACE ITINERARY DAYS (Immediately following Transports)
+    if (unplacedDays.length > 0) {
+      let daysToTake = unplacedDays.length;
+      let dHeight =
+        7.5 +
+        unplacedDays
+          .slice(0, daysToTake)
+          .reduce((sum, d) => sum + estimateDayHeight(d), 0);
+
+      while (daysToTake > 1 && dHeight > spaceLeft) {
+        daysToTake--;
+        dHeight =
+          7.5 +
+          unplacedDays
+            .slice(0, daysToTake)
+            .reduce((sum, d) => sum + estimateDayHeight(d), 0);
+      }
+
+      // If starting a multi-day itinerary with more than 2 days, require at least 2 days to fit cleanly on this page
+      const minDaysToStart = unplacedDays.length > 2 ? 2 : 1;
+
+      if (dHeight <= spaceLeft && daysToTake >= minDaysToStart) {
+        const taken = unplacedDays.splice(0, daysToTake);
+        const partTitle =
+          unplacedDays.length > 0 || dayPartIndex > 1
+            ? `DETAILED DAY-WISE TOUR ITINERARY (PART ${dayPartIndex++})`
+            : "DETAILED DAY-WISE TOUR ITINERARY";
+
+        page.days = {
+          list: taken,
+          partTitle,
+        };
+        spaceLeft -= dHeight;
+
+        // If more itinerary days still remain for subsequent pages, finish this page cleanly.
+        if (unplacedDays.length > 0) {
+          pages.push(page);
+          continue;
+        }
+      } else if (page.hotels || page.transports) {
+        // Not enough room to start days on this page with hotels/transports -> push to next page
+        pages.push(page);
+        continue;
+      }
+    } else if (
+      isFirstPage &&
+      unplacedHotels.length === 0 &&
+      transportsPlaced &&
+      activitiesPlaced &&
+      incExcPlaced &&
+      policiesPlaced &&
+      paymentPlaced
+    ) {
+      pages.push(page);
+      continue;
+    }
+
+    // 10% REMAINING SPACE RULE: If less than ~10% space remains, move to the next page
+    if (spaceLeft < MIN_SPACE_THRESHOLD) {
+      pages.push(page);
+      continue;
+    }
+
+    // STEP 4: PLACE ACTIVITIES / SIGHTSEEING
     if (!activitiesPlaced && activeActivities.length > 0) {
       if (activitiesHeight <= spaceLeft - 6) {
         page.activities = { list: activeActivities };
         spaceLeft -= activitiesHeight;
         activitiesPlaced = true;
+      } else if (page.days || page.hotels || page.transports) {
+        pages.push(page);
+        continue;
       }
     }
 
-    // STEP 4: PLACE INCLUSIONS / EXCLUSIONS
+    // STEP 5: PLACE INCLUSIONS / EXCLUSIONS
     if (!incExcPlaced && incExcHeight > 0) {
       if (incExcHeight <= spaceLeft - 6) {
         page.inclusionsExclusions = {
@@ -441,7 +702,7 @@ export function planContentPages({
         };
         spaceLeft -= incExcHeight;
         incExcPlaced = true;
-      } else if (page.days || page.hotels) {
+      } else if (page.days || page.hotels || page.transports || page.activities) {
         pages.push(page);
         continue;
       }
@@ -449,8 +710,8 @@ export function planContentPages({
       incExcPlaced = true;
     }
 
-    // STEP 5: PLACE POLICIES & PAYMENT (COMMERCIAL SECTION)
-    if (unplacedHotels.length === 0) {
+    // STEP 6: PLACE POLICIES & PAYMENT (COMMERCIAL SECTION)
+    if (unplacedHotels.length === 0 && unplacedDays.length === 0) {
       const polHeight = getPoliciesHeight();
 
       if (!policiesPlaced) {
@@ -463,7 +724,7 @@ export function planContentPages({
           };
           spaceLeft -= polHeight;
           policiesPlaced = true;
-        } else if (page.days || page.hotels || page.inclusionsExclusions) {
+        } else if (page.days || page.hotels || page.transports || page.inclusionsExclusions) {
           pages.push(page);
           continue;
         }
@@ -476,7 +737,7 @@ export function planContentPages({
           };
           spaceLeft -= paymentHeight;
           paymentPlaced = true;
-        } else if (page.days || page.hotels || page.policies) {
+        } else if (page.days || page.hotels || page.transports || page.inclusionsExclusions || page.policies) {
           pages.push(page);
           continue;
         }
@@ -486,11 +747,20 @@ export function planContentPages({
     // Safeguard: Ensure at least one section is consumed per page to avoid infinite loop
     if (Object.keys(page).length === 0) {
       if (unplacedHotels.length > 0) {
-        page.hotels = { list: unplacedHotels, compact: true };
+        placeHotels(page, unplacedHotels);
         unplacedHotels = [];
       } else if (!transportsPlaced && activeTransports.length > 0) {
         page.transports = { list: activeTransports };
         transportsPlaced = true;
+      } else if (unplacedDays.length > 0) {
+        page.days = {
+          list: unplacedDays,
+          partTitle:
+            dayPartIndex > 1
+              ? `DETAILED DAY-WISE TOUR ITINERARY (PART ${dayPartIndex++})`
+              : "DETAILED DAY-WISE TOUR ITINERARY",
+        };
+        unplacedDays = [];
       } else if (!activitiesPlaced && activeActivities.length > 0) {
         page.activities = { list: activeActivities };
         activitiesPlaced = true;
@@ -583,9 +853,18 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
 
   const numAdults = parseInt(adults) || 1;
   const numChildren = parseInt(children) || 0;
+  const numInfants = parseInt(data.infants || "0") || 0;
   const guestCount = `${numAdults} Adult${numAdults > 1 ? "s" : ""}${
     numChildren > 0 ? ` · ${numChildren} Child${numChildren > 1 ? "ren" : ""}` : ""
-  }`;
+  }${numInfants > 0 ? ` · ${numInfants} Infant${numInfants > 1 ? "s" : ""}` : ""}`;
+
+  const displayRooms = data.rooms
+    ? /^\d+$/.test(data.rooms.trim())
+      ? `${data.rooms.trim()} Room${data.rooms.trim() === "1" ? "" : "s"}`
+      : data.rooms.trim()
+    : "";
+
+  const displayMealPlan = data.mealPlan || activeHotels[0]?.mealPlan || "";
 
   const numFinalPrice = parseFloat(finalRate || "0");
   const formattedPrice = numFinalPrice > 0 ? numFinalPrice.toLocaleString("en-IN") : "0";
@@ -637,15 +916,25 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
         .join(" ")
     : "Valued Traveler";
 
+  const routeStops = useMemo(() => {
+    if (data.routePlan) {
+      if (Array.isArray(data.routePlan)) return data.routePlan.filter(Boolean);
+      if (typeof data.routePlan === "string" && data.routePlan.trim()) {
+        return data.routePlan.split(/→|->|-->/).map((s) => s.trim()).filter(Boolean);
+      }
+    }
+    return extractRouteFromItinerary(activeDays, activeTransports, destination || tripTitle);
+  }, [data.routePlan, activeDays, activeTransports, destination, tripTitle]);
+
   return (
     <div className="font-sans text-slate-800 antialiased selection:bg-teal-500 selection:text-white bg-slate-100 flex flex-col items-center">
       {/* ========================================================================= */}
       {/* PAGE 1: EXECUTIVE SUMMARY + ITINERARY (MATCHING USER SCREENSHOT)          */}
       {/* ========================================================================= */}
       <div data-pdf-page className={PAGE}>
-        <div className="p-4 sm:p-5 pb-[24mm] space-y-3">
+        <div className="p-5 pb-[20mm] space-y-2.5">
           {/* --- 1. COMPANY DETAIL & EXECUTIVE SUMMARY CARD --- */}
-          <div className="rounded-2xl border border-slate-300/90 bg-white p-3.5 sm:p-4 shadow-xs space-y-2.5">
+          <div className="rounded-2xl border border-slate-300/90 bg-white p-4 shadow-xs space-y-2.5">
             {/* Top Row: Company Info + Quotation Info */}
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3 min-w-0">
@@ -653,7 +942,7 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
                   <CompanyLogo
                     logo={company.logo}
                     name={cleanCompanyName}
-                    className="h-12 sm:h-14 w-auto max-w-[92px] object-contain shrink-0 mb-0"
+                    className="h-16 w-auto max-w-[150px] max-h-[66px] object-contain shrink-0 mb-0"
                   />
                 </div>
 
@@ -708,19 +997,24 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
                   </span>
                 </div>
 
-                <div className="bg-[#eff6ff] border border-blue-200/70 rounded-xl p-2.5 flex flex-col justify-between flex-1 min-h-[88px] min-w-0">
-                  <p className="font-bold text-[10px] text-[#0f2942] uppercase leading-tight break-words">
-                    TRIP: {duration} {destination || tripTitle}
-                  </p>
+                <div className="bg-[#eff6ff] border border-blue-200/70 rounded-xl p-3 flex flex-col justify-between flex-1 min-h-[96px] min-w-0">
+                  <div className="space-y-1">
+                    <span className="inline-block px-2 py-0.5 rounded-md bg-blue-100/80 text-blue-800 text-[8.5px] font-bold uppercase tracking-wider leading-none">
+                      {duration ? `${duration} Package` : "Tour Package"}
+                    </span>
+                    <h4 className="font-black text-[14px] text-[#0f2942] uppercase leading-tight tracking-tight break-words">
+                      {tripTitle || (destination ? `${destination} Tour Package` : "Confirmed Package")}
+                    </h4>
+                  </div>
 
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-end pt-1.5 border-t border-blue-200/60 mt-1.5">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-end pt-2 border-t border-blue-200/60 mt-1.5">
                     <div className="min-w-0">
-                      <p className="text-[9.5px] font-bold text-slate-700 leading-tight">About/Details:</p>
-                      <p className="text-[9px] text-slate-600 font-medium leading-tight break-words">
-                        {tripTitle || (destination ? `${destination} Tour` : "Confirmed Package")}
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider leading-tight">Destination:</p>
+                      <p className="text-[9.5px] text-slate-800 font-bold leading-tight break-words">
+                        {destination || "Confirmed Destination"}
                       </p>
                     </div>
-                    <p className="text-[20px] sm:text-[22px] font-black text-[#0f2942] leading-none shrink-0 pl-2 border-l border-slate-300">
+                    <p className="text-[21px] font-black text-[#0f2942] leading-none shrink-0 pl-2 border-l border-slate-300">
                       ₹{formattedPrice}
                     </p>
                   </div>
@@ -735,14 +1029,18 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
                   </p>
                 </div>
 
-                <div className="bg-[#eff6ff] border border-blue-200/70 rounded-xl p-2.5 space-y-1 flex-1 min-h-[88px] min-w-0 text-[9.5px]">
+                <div className="bg-[#eff6ff] border border-blue-200/70 rounded-xl p-2.5 space-y-1 flex-1 min-h-[96px] min-w-0 text-[9.5px]">
                   <PdfFieldRow label="Client Name:" value={customerDisplayName} />
                   <PdfFieldRow
                     label="Package:"
                     value={tripTitle || (destination ? `${destination} Tour` : "Confirmed Package")}
+                    strong
+                    size="large"
                   />
                   <PdfFieldRow label="Duration:" value={duration} />
                   <PdfFieldRow label="Traveler:" value={guestCount} />
+                  {displayRooms && <PdfFieldRow label="Rooms:" value={displayRooms} />}
+                  {displayMealPlan && <PdfFieldRow label="Meal Plan:" value={displayMealPlan} />}
                   <PdfFieldRow
                     label="Destination:"
                     value={destination || "Confirmed Destination"}
@@ -751,37 +1049,73 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
                 </div>
               </div>
             </div>
+
+            {/* --- 3. TOUR ROUTE PLAN BANNER --- */}
+            {routeStops && routeStops.length > 0 && (
+              <div className="pt-2 border-t border-slate-200/80">
+                <div className="bg-[#eff6ff] border border-blue-200/70 rounded-xl px-3 py-2 flex items-center flex-wrap gap-y-1.5 gap-x-2">
+                  <div className="flex items-center gap-1.5 text-[#0f2942] font-black text-[10.5px] uppercase tracking-wider shrink-0 mr-0.5">
+                    <div className="w-5 h-5 rounded-md bg-[#0f2942] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-sky-300">
+                        <circle cx="6" cy="19" r="2.5" />
+                        <path d="M8.5 19h7a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H16" />
+                        <circle cx="18.5" cy="5" r="2.5" />
+                      </svg>
+                    </div>
+                    <span>Route:</span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-y-1.5 gap-x-1.5 text-[10.5px]">
+                    {routeStops.map((stop, idx) => (
+                      <React.Fragment key={idx}>
+                        {idx > 0 && (
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="w-3.5 h-3.5 text-sky-500 shrink-0 select-none"
+                          >
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                            <polyline points="12 5 19 12 12 19" />
+                          </svg>
+                        )}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-blue-200/80 text-slate-800 font-bold text-[10px] tracking-tight shadow-2xs">
+                          {renderRouteStopIcon(stop)}
+                          <span>{stop}</span>
+                        </span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* --- 2. DETAILED DAY-WISE TOUR ITINERARY (PART 1) --- */}
+          {/* --- 2. CONFIRMED ACCOMMODATION & STAYS --- */}
+          {firstPagePlan?.hotels && (
+            <HotelsSectionContent
+              hotels={firstPagePlan.hotels.list}
+              startNight={firstPagePlan.hotels.startNight}
+              totalHotels={firstPagePlan.hotels.totalHotels}
+            />
+          )}
+
+          {/* --- 3. TRANSPORTATION & FLEET SPECIFICATIONS --- */}
+          {firstPagePlan?.transports && (
+            <TransportsSectionContent transports={firstPagePlan.transports.list} />
+          )}
+
+          {/* --- 4. DETAILED DAY-WISE TOUR ITINERARY --- */}
           {firstPagePlan?.days && (
             <DaysSectionContent
               days={firstPagePlan.days.list}
               totalDays={activeDays.length}
-              hotelMealPlan={activeHotels[0]?.mealPlan}
+              hotelMealPlan={displayMealPlan || activeHotels[0]?.mealPlan}
               partTitle={firstPagePlan.days.partTitle}
-              compact={firstPagePlan.days.compact}
-              hasOtherSections={Boolean(
-                firstPagePlan.hotels ||
-                firstPagePlan.transports ||
-                firstPagePlan.activities ||
-                firstPagePlan.inclusionsExclusions ||
-                firstPagePlan.policies ||
-                firstPagePlan.payment
-              )}
-              isFirstPage={true}
             />
-          )}
-
-          {firstPagePlan?.hotels && (
-            <HotelsSectionContent
-              hotels={firstPagePlan.hotels.list}
-              compact={firstPagePlan.hotels.compact}
-            />
-          )}
-
-          {firstPagePlan?.transports && (
-            <TransportsSectionContent transports={firstPagePlan.transports.list} />
           )}
 
           {firstPagePlan?.activities && (
@@ -822,40 +1156,32 @@ export function ItineraryPdfDocument({ data, user }: ItineraryPdfDocumentProps) 
       </div>
 
       {/* ========================================================================= */}
-      {/* SUBSEQUENT PAGES: DYNAMIC SMART-PACKED SECTIONS (DAYS, STAYS, POLICIES, PAY) */}
+      {/* SUBSEQUENT PAGES: DYNAMIC SMART-PACKED SECTIONS (STAYS, TRANSPORT, DAYS, PAY) */}
       {/* ========================================================================= */}
       {contentPages.slice(1).map((page, idx) => {
         const pageNum = idx + 2;
         return (
           <div key={idx} data-pdf-page className={PAGE}>
-            <div className="p-5 pb-[24mm] space-y-2">
-              {page.days && (
-                <DaysSectionContent
-                  days={page.days.list}
-                  totalDays={activeDays.length}
-                  hotelMealPlan={activeHotels[0]?.mealPlan}
-                  partTitle={page.days.partTitle}
-                  compact={page.days.compact}
-                  hasOtherSections={Boolean(
-                    page.hotels ||
-                    page.transports ||
-                    page.activities ||
-                    page.inclusionsExclusions ||
-                    page.policies ||
-                    page.payment
-                  )}
-                />
-              )}
-
+            <div className="p-5 pb-[20mm] space-y-2.5">
               {page.hotels && (
                 <HotelsSectionContent
                   hotels={page.hotels.list}
-                  compact={page.hotels.compact}
+                  startNight={page.hotels.startNight}
+                  totalHotels={page.hotels.totalHotels}
                 />
               )}
 
               {page.transports && (
                 <TransportsSectionContent transports={page.transports.list} />
+              )}
+
+              {page.days && (
+                <DaysSectionContent
+                  days={page.days.list}
+                  totalDays={activeDays.length}
+                  hotelMealPlan={displayMealPlan || activeHotels[0]?.mealPlan}
+                  partTitle={page.days.partTitle}
+                />
               )}
 
               {page.activities && (
@@ -943,64 +1269,16 @@ function DaysSectionContent({
   totalDays,
   hotelMealPlan,
   partTitle,
-  compact = false,
-  hasOtherSections = false,
-  isFirstPage = false,
 }: {
   days: DetailedItineraryDay[];
   totalDays: number;
   hotelMealPlan?: string;
   partTitle?: string;
-  compact?: boolean;
-  hasOtherSections?: boolean;
-  isFirstPage?: boolean;
 }) {
-  const count = days.length;
-  // If this page contains ONLY days and has empty room, scale up typography and spacing
-  const tier: "spacious" | "normal" | "comfortable" | "compact" =
-    hasOtherSections || compact || count >= 6
-      ? "compact"
-      : isFirstPage
-      ? count <= 2
-        ? "normal"
-        : "comfortable"
-      : count <= 3
-      ? "spacious"
-      : count === 4
-      ? "normal"
-      : "comfortable";
-
-  const headerTitleClass =
-    tier === "spacious"
-      ? "text-[15.5px] leading-6 font-bold uppercase tracking-wider text-[#1e3a8a]"
-      : tier === "normal"
-      ? "text-[14.5px] leading-[23px] font-bold uppercase tracking-wider text-[#1e3a8a]"
-      : tier === "comfortable"
-      ? "text-[14px] leading-[22px] font-bold uppercase tracking-wider text-[#1e3a8a]"
-      : "text-[13.5px] leading-5 font-bold uppercase tracking-wider text-[#1e3a8a]";
-
-  const headerIconClass =
-    tier === "spacious"
-      ? "w-5 h-5 text-sky-600 shrink-0"
-      : tier === "normal"
-      ? "w-[19px] h-[19px] text-sky-600 shrink-0"
-      : tier === "comfortable"
-      ? "w-[18px] h-[18px] text-sky-600 shrink-0"
-      : "w-4 h-4 text-sky-600 shrink-0";
-
-  const listSpacingClass =
-    tier === "spacious"
-      ? "space-y-3"
-      : tier === "normal"
-      ? "space-y-2.5"
-      : tier === "comfortable"
-      ? "space-y-2"
-      : "space-y-1.5";
-
   return (
-    <div className={tier === "spacious" ? "space-y-1.5" : "space-y-1"}>
+    <div className="space-y-1.5">
       <div className="flex items-center gap-2 border-b border-slate-200 pb-1 mb-1">
-        <div className={headerIconClass}>
+        <div className="w-4 h-4 text-sky-600 shrink-0">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -1016,12 +1294,12 @@ function DaysSectionContent({
             <line x1="3" y1="10" x2="21" y2="10"></line>
           </svg>
         </div>
-        <h3 className={headerTitleClass}>
+        <h3 className="text-[13px] leading-5 font-bold uppercase tracking-wider text-[#1e3a8a]">
           {partTitle || "DETAILED DAY-WISE TOUR ITINERARY"}
         </h3>
       </div>
 
-      <div className={listSpacingClass}>
+      <div className="space-y-2">
         {days.map((day, idx) => (
           <DayTimelineItem
             key={day.day}
@@ -1029,7 +1307,6 @@ function DaysSectionContent({
             totalDays={totalDays}
             hotelMealPlan={hotelMealPlan}
             isLast={idx === days.length - 1}
-            tier={tier}
           />
         ))}
       </div>
@@ -1039,27 +1316,54 @@ function DaysSectionContent({
 
 function HotelsSectionContent({
   hotels,
-  compact = false,
+  startNight = 1,
+  totalHotels,
 }: {
   hotels: ItineraryHotel[];
-  compact?: boolean;
+  startNight?: number;
+  totalHotels?: number;
 }) {
   if (!hotels || hotels.length === 0) return null;
+
+  const displayTotalHotels = totalHotels ?? hotels.length;
+  let currentNight = startNight;
 
   return (
     <div className="space-y-1.5 pt-0.5">
       <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-          CONFIRMED ACCOMMODATION &amp; STAYS
-        </h3>
-        <span className="text-[10px] text-slate-400 font-medium">
-          {hotels.length} Hotel{hotels.length > 1 ? "s" : ""} Selected
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-4 text-sky-600 shrink-0">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-full h-full"
+            >
+              <path d="M3 20v-8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8" />
+              <path d="M5 10V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4" />
+              <path d="M3 18h18" />
+            </svg>
+          </div>
+          <h3 className="text-[13px] leading-5 font-bold uppercase tracking-wider text-[#1e3a8a]">
+            CONFIRMED ACCOMMODATION &amp; STAYS
+          </h3>
+        </div>
+        <span className="text-[10.5px] text-slate-400 font-medium">
+          {displayTotalHotels} Hotel{displayTotalHotels > 1 ? "s" : ""} Selected
         </span>
       </div>
 
-      <div className={compact ? "space-y-1" : "space-y-1.5"}>
+      <div className="space-y-1.5">
         {hotels.map((hotel, hIdx) => {
-          const nightLabels = [`${hIdx + 1}${getOrdinalSuffix(hIdx + 1)}`];
+          const hotelNights = Math.max(1, Number(hotel.nights) || 1);
+          const nightLabels = Array.from({ length: hotelNights }, (_, nIdx) => {
+            const nightNum = currentNight + nIdx;
+            return `${nightNum}${getOrdinalSuffix(nightNum)}`;
+          });
+          currentNight += hotelNights;
           const hotelPhoto =
             hotel.imageUrl ||
             (hotel.amenities?.startsWith("http") ? hotel.amenities : null);
@@ -1067,27 +1371,25 @@ function HotelsSectionContent({
           return (
             <div
               key={hIdx}
-              className={`bg-white rounded-xl border border-slate-200/90 shadow-2xs ${
-                compact ? "p-2 space-y-0.5" : "p-2.5 space-y-1.5"
-              }`}
+              className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-2.5 space-y-1.5"
             >
               <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-0.5">
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {nightLabels.map((nl) => (
                     <span
                       key={nl}
-                      className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 text-[9px] font-bold border border-teal-100"
+                      className="px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 text-[9.5px] font-bold border border-teal-100"
                     >
                       {nl} Night
                     </span>
                   ))}
-                  <span className="font-bold text-slate-900 text-[11px] ml-1">
+                  <span className="font-bold text-slate-900 text-[12px] ml-1">
                     Stay at {hotel.location || "Confirmed Destination"}
                   </span>
                 </div>
 
                 {(hotel.checkIn || hotel.checkOut) && (
-                  <p className="text-[9px] text-slate-500 font-medium">
+                  <p className="text-[9.5px] text-slate-500 font-medium">
                     In: {formatPdfDateTime(hotel.checkIn, "14:00")} · Out:{" "}
                     {formatPdfDateTime(hotel.checkOut, "11:00")}
                   </p>
@@ -1097,11 +1399,11 @@ function HotelsSectionContent({
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-0.5 flex-1 min-w-0">
                   <div>
-                    <h4 className="text-[12px] font-bold text-slate-900 leading-snug">
+                    <h4 className="text-[13px] font-bold text-slate-900 leading-snug">
                       {hotel.hotelName}
                     </h4>
                     {hotel.starRating && (
-                      <p className="text-[9.5px] text-amber-500 font-bold tracking-widest mt-0.5">
+                      <p className="text-[10px] text-amber-500 font-bold tracking-widest mt-0.5">
                         {renderStarRating(hotel.starRating)}
                       </p>
                     )}
@@ -1109,29 +1411,29 @@ function HotelsSectionContent({
 
                   <div className="grid grid-cols-2 gap-2 text-xs pt-0.5">
                     <div>
-                      <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
+                      <p className="text-[8.5px] font-bold uppercase tracking-wider text-slate-400">
                         ROOM DETAILS
                       </p>
-                      <p className="font-semibold text-slate-900 text-[9.5px]">
+                      <p className="font-semibold text-slate-900 text-[10.5px]">
                         {hotel.rooms || 1} {hotel.roomCategory || "Deluxe Room"}
                       </p>
-                      <p className="text-[8.5px] text-slate-500">
+                      <p className="text-[9.5px] text-slate-500">
                         {hotel.rooms || 1} Room(s) · {hotel.nights || 1} Night(s)
                       </p>
                     </div>
 
                     <div>
-                      <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
+                      <p className="text-[8.5px] font-bold uppercase tracking-wider text-slate-400">
                         MEAL PLAN
                       </p>
-                      <p className="font-bold text-teal-800 uppercase text-[9.5px]">
+                      <p className="font-bold text-teal-800 uppercase text-[10.5px]">
                         {hotel.mealPlan || "CP (Breakfast Included)"}
                       </p>
                     </div>
                   </div>
 
                   {hotel.amenities && !hotel.amenities.startsWith("http") && (
-                    <p className="text-[8.5px] text-slate-500 pt-0.5 border-t border-slate-100">
+                    <p className="text-[9.5px] text-slate-500 pt-0.5 border-t border-slate-100">
                       <span className="font-semibold text-slate-600">Inclusions: </span>
                       {hotel.amenities}
                     </p>
@@ -1139,11 +1441,7 @@ function HotelsSectionContent({
                 </div>
 
                 {hotelPhoto && (
-                  <div
-                    className={`${
-                      compact ? "w-[40mm] h-[24mm]" : "w-[46mm] h-[28mm]"
-                    } shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-2xs`}
-                  >
+                  <div className="w-[44mm] h-[26mm] shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-2xs">
                     <img
                       src={hotelPhoto}
                       alt={hotel.hotelName}
@@ -1171,38 +1469,79 @@ function TransportsSectionContent({
   return (
     <div className="space-y-1.5 pt-0.5">
       <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
-          TRANSPORTATION &amp; FLEET SPECIFICATIONS
-        </h3>
-        <span className="text-[10px] text-slate-400 font-medium">Dedicated Vehicle</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-4 text-sky-600 shrink-0">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-full h-full"
+            >
+              <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2" />
+              <circle cx="7" cy="17" r="2" />
+              <path d="M9 17h6" />
+              <circle cx="17" cy="17" r="2" />
+            </svg>
+          </div>
+          <h3 className="text-[13px] leading-5 font-bold uppercase tracking-wider text-[#1e3a8a]">
+            TRANSPORTATION &amp; FLEET SPECIFICATIONS
+          </h3>
+        </div>
+        <span className="text-[10.5px] text-slate-400 font-medium">Dedicated Vehicle</span>
       </div>
 
       <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
-        <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10px]">
+        <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10.5px]">
           <div className="w-8">#</div>
           <div className="w-32">Vehicle Category</div>
           <div className="flex-1">Vehicle Details &amp; Inclusions</div>
           <div className="w-28">Route / Scope</div>
           <div className="w-16 text-right">Units</div>
         </div>
-        {transports.map((t, idx) => (
-          <div
-            key={idx}
-            className="flex px-3 py-1.5 border-b border-slate-150 last:border-0 bg-white items-center text-[10.5px]"
-          >
-            <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
-            <div className="w-32 font-bold capitalize text-slate-900">
-              {t.vehicleType || "Private AC Vehicle"}
+        {transports.map((t, idx) => {
+          const fromDateLabel = formatPdfDate(t.date);
+          const toDateLabel = formatPdfDate(t.toDate);
+          const hasDateRange = Boolean(fromDateLabel || toDateLabel || t.pickupTime);
+          const hasInclusions = Boolean(t.inclusions && t.inclusions.length > 0);
+
+          return (
+            <div
+              key={idx}
+              className="flex px-3 py-1.5 border-b border-slate-150 last:border-0 bg-white items-start text-[11.5px]"
+            >
+              <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
+              <div className="w-32 font-bold capitalize text-slate-900 pr-2">
+                {t.vehicleType || "Private AC Vehicle"}
+              </div>
+              <div className="flex-1 text-slate-700 leading-tight space-y-0.5 pr-2">
+                {hasDateRange && (
+                  <div className="text-[10.5px] font-medium text-slate-500">
+                    {fromDateLabel && `From: ${fromDateLabel}`}
+                    {toDateLabel && `${fromDateLabel ? " → " : "To: "}${toDateLabel}`}
+                    {t.pickupTime && `${fromDateLabel || toDateLabel ? " · " : ""}Pickup: ${t.pickupTime}`}
+                  </div>
+                )}
+                {hasInclusions && (
+                  <div className="text-[11px] font-medium text-emerald-700">
+                    Included: {t.inclusions!.join(" • ")}
+                  </div>
+                )}
+                {(t.notes || (!hasInclusions && !hasDateRange)) && (
+                  <div className="whitespace-pre-line">
+                    {t.notes || "Dedicated AC cab with chauffeur, fuel, toll taxes & parking"}
+                  </div>
+                )}
+              </div>
+              <div className="w-28 text-slate-600 font-medium">{t.route || "All Transfers"}</div>
+              <div className="w-16 text-right font-bold text-slate-800">
+                {t.vehiclesCount ? `${t.vehiclesCount} Unit(s)` : "1"}
+              </div>
             </div>
-            <div className="flex-1 text-slate-700 whitespace-pre-line leading-tight">
-              {t.notes || "Dedicated AC cab with chauffeur, fuel, toll taxes & parking"}
-            </div>
-            <div className="w-28 text-slate-600 font-medium">{t.route || "All Transfers"}</div>
-            <div className="w-16 text-right font-bold text-slate-800">
-              {t.vehiclesCount ? `${t.vehiclesCount} Unit(s)` : "1"}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1220,14 +1559,14 @@ function ActivitiesSectionContent({
   return (
     <div className="space-y-1.5 pt-0.5">
       <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+        <h3 className="text-[13px] leading-5 font-bold uppercase tracking-wider text-[#1e3a8a]">
           ACTIVITIES, EXCURSIONS &amp; EXPERIENCES
         </h3>
-        <span className="text-[10px] text-slate-400 font-medium">Confirmed Sightseeing</span>
+        <span className="text-[10.5px] text-slate-400 font-medium">Confirmed Sightseeing</span>
       </div>
 
       <div className="border border-slate-200 rounded-lg overflow-hidden text-xs shadow-2xs">
-        <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10px]">
+        <div className="bg-[#1e3a8a] text-white font-semibold flex px-3 py-1.5 text-[10.5px]">
           <div className="w-8">#</div>
           <div className="flex-1">Activity / Attraction</div>
           <div className="w-36">Location</div>
@@ -1237,7 +1576,7 @@ function ActivitiesSectionContent({
         {activities.map((act, idx) => (
           <div
             key={idx}
-            className="flex px-3 py-1.5 border-b border-slate-150 last:border-0 bg-white items-center text-[10.5px]"
+            className="flex px-3 py-1.5 border-b border-slate-150 last:border-0 bg-white items-center text-[11.5px]"
           >
             <div className="w-8 text-slate-400 font-medium">{idx + 1}</div>
             <div className="flex-1 font-bold text-slate-900 capitalize">{act.title}</div>
@@ -1261,10 +1600,10 @@ function InclusionsExclusionsContent({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+        <h3 className="text-[13px] leading-5 font-bold uppercase tracking-wider text-[#1e3a8a]">
           INCLUSIONS &amp; EXCLUSIONS
         </h3>
-        <span className="text-[10px] text-slate-400 font-medium">Commercial Guidelines</span>
+        <span className="text-[10.5px] text-slate-400 font-medium">Commercial Guidelines</span>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -1274,21 +1613,21 @@ function InclusionsExclusionsContent({
             <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
               <Check className="w-2.5 h-2.5 text-white stroke-[3]" />
             </span>
-            <p className="text-[10.5px] font-bold uppercase tracking-wider text-emerald-900">
+            <p className="text-[11.5px] font-bold uppercase tracking-wider text-emerald-900">
               PACKAGE INCLUSIONS
             </p>
           </div>
 
-          <ul className="space-y-1 text-[10px] text-slate-700">
+          <ul className="space-y-1 text-[12px] text-slate-700">
             {inclusions.length > 0 ? (
               inclusions.map((inc, i) => (
                 <li key={i} className="flex items-start gap-1.5 leading-snug">
-                  <Check className="w-3 h-3 text-emerald-600 shrink-0 stroke-[2.5] mt-0.5" />
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 stroke-[2.5] mt-0.5" />
                   <span className="font-medium text-slate-800">{inc}</span>
                 </li>
               ))
             ) : (
-              <li className="text-[9.5px] text-slate-400 italic">No specific inclusions added</li>
+              <li className="text-[11px] text-slate-400 italic">No specific inclusions added</li>
             )}
           </ul>
         </div>
@@ -1299,21 +1638,21 @@ function InclusionsExclusionsContent({
             <span className="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center shrink-0">
               <X className="w-2.5 h-2.5 text-white stroke-[3]" />
             </span>
-            <p className="text-[10.5px] font-bold uppercase tracking-wider text-rose-900">
+            <p className="text-[11.5px] font-bold uppercase tracking-wider text-rose-900">
               PACKAGE EXCLUSIONS
             </p>
           </div>
 
-          <ul className="space-y-1 text-[10px] text-slate-700">
+          <ul className="space-y-1 text-[12px] text-slate-700">
             {exclusions.length > 0 ? (
               exclusions.map((exc, i) => (
                 <li key={i} className="flex items-start gap-1.5 leading-snug">
-                  <X className="w-3 h-3 text-rose-500 shrink-0 stroke-[2.5] mt-0.5" />
+                  <X className="w-3.5 h-3.5 text-rose-500 shrink-0 stroke-[2.5] mt-0.5" />
                   <span className="font-medium text-slate-800">{exc}</span>
                 </li>
               ))
             ) : (
-              <li className="text-[9.5px] text-slate-400 italic">No specific exclusions added</li>
+              <li className="text-[11px] text-slate-400 italic">No specific exclusions added</li>
             )}
           </ul>
         </div>
@@ -1336,8 +1675,8 @@ function PoliciesContent({
     <div className="space-y-2">
       <div className="border border-slate-200 bg-slate-50/50 rounded-xl p-2.5 space-y-1">
         <div>
-          <p className="text-[9.5px] font-bold uppercase text-teal-800 mb-0.5">Special Agent Notes:</p>
-          <p className="text-[10px] text-slate-700 whitespace-pre-line leading-relaxed bg-white p-2 rounded-lg border border-teal-200">
+          <p className="text-[11px] font-bold uppercase text-teal-800 mb-1">Special Agent Notes:</p>
+          <p className="text-[12px] text-slate-700 whitespace-pre-line leading-relaxed bg-white p-2.5 rounded-lg border border-teal-200">
             {clientNotes}
           </p>
         </div>
@@ -1358,34 +1697,34 @@ function PaymentSectionContent({
   return (
     <div className="space-y-2.5">
       <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-[#1e3a8a]">
+        <h3 className="text-[13px] leading-5 font-bold uppercase tracking-wider text-[#1e3a8a]">
           PAYMENT DETAILS &amp; BANK TRANSFER OPTIONS
         </h3>
-        <span className="text-[10px] text-slate-400 font-medium">Secure Payment Gateway</span>
+        <span className="text-[10.5px] text-slate-400 font-medium">Secure Payment Gateway</span>
       </div>
 
       {/* Bank Card + QR Code */}
       <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-2">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1.5 text-xs text-slate-700 flex-1">
-            <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400">
+            <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
               BANK TRANSFER DETAILS
             </p>
 
             {company.accountHolder && (
-              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[11.5px]">
                 <span className="text-slate-500 font-medium">Account Name:</span>
                 <strong className="text-slate-900">{company.accountHolder}</strong>
               </div>
             )}
             {company.bankName && (
-              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[11.5px]">
                 <span className="text-slate-500 font-medium">Bank Name:</span>
                 <strong className="text-slate-900">{company.bankName}</strong>
               </div>
             )}
             {company.accountNumber && (
-              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[11.5px]">
                 <span className="text-slate-500 font-medium">Account Number:</span>
                 <strong className="font-mono text-slate-900 tracking-wider">
                   {company.accountNumber}
@@ -1393,7 +1732,7 @@ function PaymentSectionContent({
               </div>
             )}
             {company.ifsc && (
-              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[11.5px]">
                 <span className="text-slate-500 font-medium">IFSC Code:</span>
                 <strong className="font-mono text-slate-900 tracking-wider">
                   {company.ifsc}
@@ -1401,24 +1740,24 @@ function PaymentSectionContent({
               </div>
             )}
             {company.upiId && (
-              <div className="flex justify-between border-b border-slate-100 pb-1 text-[10.5px]">
+              <div className="flex justify-between border-b border-slate-100 pb-1 text-[11.5px]">
                 <span className="text-slate-500 font-medium">UPI ID:</span>
                 <strong className="font-mono text-teal-800 font-bold">{company.upiId}</strong>
               </div>
             )}
             {company.phone && (
-              <div className="flex justify-between text-[10.5px]">
+              <div className="flex justify-between text-[11.5px]">
                 <span className="text-slate-500 font-medium">Phone / WhatsApp:</span>
                 <strong className="font-mono text-slate-900">{company.phone}</strong>
               </div>
             )}
 
             <div className="flex items-center gap-2 pt-1">
-              <span className="text-slate-400 font-medium text-[9.5px]">Supported:</span>
+              <span className="text-slate-400 font-medium text-[10px]">Supported:</span>
               <PaytmBadge />
               <GpayBadge />
               <PhonePeBadge />
-              <span className="text-[9px] font-semibold text-slate-500 px-1.5 py-0.5 rounded bg-slate-100">
+              <span className="text-[9.5px] font-semibold text-slate-500 px-1.5 py-0.5 rounded bg-slate-100">
                 NEFT / RTGS
               </span>
             </div>
@@ -1439,8 +1778,8 @@ function PaymentSectionContent({
                   <UpiPaymentQr size={105} upiId={company.upiId} />
                 )}
               </div>
-              <span className="text-[9px] font-bold text-teal-800 mt-1">Scan &amp; Pay via UPI</span>
-              <span className="text-[8px] text-slate-400">Zero Convenience Fee</span>
+              <span className="text-[9.5px] font-bold text-teal-800 mt-1">Scan &amp; Pay via UPI</span>
+              <span className="text-[8.5px] text-slate-400">Zero Convenience Fee</span>
             </div>
           )}
         </div>
@@ -1449,20 +1788,20 @@ function PaymentSectionContent({
       {/* AUTHORIZED SIGN-OFF & STAMP */}
       <div className="pt-1 flex items-end justify-between text-xs text-slate-600">
         <div className="space-y-0.5">
-          <p className="text-[9.5px] uppercase font-bold text-slate-400">QUOTATION ISSUED BY</p>
+          <p className="text-[10px] uppercase font-bold text-slate-400">QUOTATION ISSUED BY</p>
           <p className="font-bold text-slate-900 text-[13px]">
             {(company.name || "Authorized Travel Partner").replace(/^\.+/, "").trim()}
           </p>
-          <p className="text-[10px] text-slate-500">
+          <p className="text-[10.5px] text-slate-500">
             {[company.email, company.phone].filter(Boolean).join(" · ")}
           </p>
         </div>
 
         <div className="text-center space-y-0.5">
-          <div className="w-36 h-12 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-[9.5px] text-slate-400 bg-white">
+          <div className="w-36 h-12 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-[10px] text-slate-400 bg-white">
             Authorized Sign &amp; Seal
           </div>
-          <p className="text-[8.5px] text-slate-400">Official Travel Specialist Signature</p>
+          <p className="text-[9px] text-slate-400">Official Travel Specialist Signature</p>
         </div>
       </div>
 
@@ -1488,11 +1827,11 @@ function PaymentSectionContent({
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
               />
             </svg>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-800">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-800">
               Verified Client Reviews &amp; Testimonials
             </span>
           </div>
-          <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+          <span className="text-[9.5px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
             ★★★★★ 5.0 Rating · Google Reviews
           </span>
         </div>
@@ -1628,142 +1967,54 @@ function getDayHighlights(day: DetailedItineraryDay): string {
 
 function DayTimelineItem({
   day,
-  totalDays,
-  hotelMealPlan,
   isLast,
-  tier = "comfortable",
 }: {
   day: DetailedItineraryDay;
   totalDays: number;
   hotelMealPlan?: string;
   isLast?: boolean;
-  tier?: "spacious" | "normal" | "comfortable" | "compact";
 }) {
   const photo = day.images?.[0];
-  const cleanTitle = day.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, "").trim() || "Tour & Sightseeing";
+  const cleanTitle =
+    day.title
+      .replace(/^(?:day\s*\d+\s*[:\-–—]*\s*)+/i, "")
+      .replace(/^[:\-–—\s]+/, "")
+      .trim() || "Tour & Sightseeing";
   const points = parseDayPoints(day.description, day.activities, day.title);
   const explicitHighlights = day.highlights && day.highlights.length > 0 ? day.highlights.join(", ") : "";
 
-  const badgeWidthCol =
-    tier === "spacious"
-      ? "w-[34px]"
-      : tier === "normal"
-      ? "w-[32px]"
-      : tier === "comfortable"
-      ? "w-[30px]"
-      : "w-[26px]";
-
-  const badgeCircle =
-    tier === "spacious"
-      ? "w-[34px] h-[34px] text-[15px] font-black"
-      : tier === "normal"
-      ? "w-[32px] h-[32px] text-[14.5px] font-bold"
-      : tier === "comfortable"
-      ? "w-[30px] h-[30px] text-[14px] font-bold"
-      : "w-[26px] h-[26px] text-[13px] font-bold";
-
-  const cardPadding =
-    tier === "spacious"
-      ? "p-3.5 space-y-2 rounded-xl"
-      : tier === "normal"
-      ? "p-3 space-y-1.5 rounded-xl"
-      : tier === "comfortable"
-      ? "p-2.5 space-y-1.5 rounded-xl"
-      : "p-2 space-y-1 rounded-lg";
-
-  const titleClass =
-    tier === "spacious"
-      ? "text-[16px] leading-6 font-black text-slate-900 break-words"
-      : tier === "normal"
-      ? "text-[15px] leading-[23px] font-bold text-slate-900 break-words"
-      : tier === "comfortable"
-      ? "text-[14.5px] leading-[22px] font-bold text-slate-900 break-words"
-      : "text-[13.5px] leading-snug font-bold text-slate-900 break-words";
-
-  const listGap =
-    tier === "spacious"
-      ? "space-y-1.5"
-      : tier === "normal"
-      ? "space-y-1"
-      : tier === "comfortable"
-      ? "space-y-1"
-      : "space-y-0.5";
-
-  const bulletDot =
-    tier === "spacious"
-      ? "mt-[8px] w-[7px] h-[7px] rounded-full bg-[#0284c7] shrink-0"
-      : tier === "normal"
-      ? "mt-[7.5px] w-[6.5px] h-[6.5px] rounded-full bg-[#0284c7] shrink-0"
-      : tier === "comfortable"
-      ? "mt-[7px] w-[6px] h-[6px] rounded-full bg-[#0284c7] shrink-0"
-      : "mt-[6px] w-[5.5px] h-[5.5px] rounded-full bg-[#0284c7] shrink-0";
-
-  const bulletText =
-    tier === "spacious"
-      ? "text-[13.8px] leading-[23px] text-slate-800 break-words font-medium"
-      : tier === "normal"
-      ? "text-[13.2px] leading-[22px] text-slate-800 break-words font-medium"
-      : tier === "comfortable"
-      ? "text-[12.8px] leading-[21px] text-slate-800 break-words"
-      : "text-[12px] leading-[19px] text-slate-800 break-words";
-
-  const highlightsClass =
-    tier === "spacious"
-      ? "text-[12.5px] leading-snug pt-1.5"
-      : tier === "normal"
-      ? "text-[12.2px] leading-snug pt-1"
-      : tier === "comfortable"
-      ? "text-[12px] leading-snug pt-1"
-      : "text-[11.2px] leading-snug pt-0.5";
-
-  const highlightsIcon =
-    tier === "spacious" || tier === "normal"
-      ? "w-4 h-4 text-amber-500 shrink-0 mt-0.5"
-      : tier === "comfortable"
-      ? "w-[15px] h-[15px] text-amber-500 shrink-0 mt-0.5"
-      : "w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5";
-
-  const photoSize =
-    tier === "spacious"
-      ? "w-[54mm] h-[35mm]"
-      : tier === "normal"
-      ? "w-[50mm] h-[32mm]"
-      : tier === "comfortable"
-      ? "w-[48mm] h-[30mm]"
-      : "w-[44mm] h-[26mm]";
-
   return (
-    <div className={`flex items-stretch ${tier === "spacious" ? "gap-3" : "gap-2.5"}`}>
-      <div className={`flex flex-col items-center shrink-0 ${badgeWidthCol} pt-0.5`}>
-        <div
-          className={`${badgeCircle} rounded-full bg-[#0284c7] text-white flex items-center justify-center shadow-xs shrink-0 ring-2 ring-white`}
-        >
+    <div className="flex items-stretch gap-2.5">
+      <div className="flex flex-col items-center shrink-0 w-[28px] pt-0.5">
+        <div className="w-[28px] h-[28px] text-[13px] font-bold rounded-full bg-[#0284c7] text-white flex items-center justify-center shadow-xs shrink-0 ring-2 ring-white">
           {day.day}
         </div>
         {!isLast && <div className="w-[2px] flex-1 bg-sky-200 my-1.5" />}
       </div>
 
-      <div className={`flex-1 min-w-0 bg-white border border-slate-200/90 shadow-2xs ${cardPadding}`}>
+      <div className="flex-1 min-w-0 bg-white border border-slate-200/90 shadow-2xs p-2.5 space-y-1.5 rounded-xl">
         <div className="border-b border-slate-100 pb-1">
-          <h4 className={titleClass}>
+          <h4 className="text-[13.5px] leading-snug font-bold text-slate-900 break-words">
             Day {day.day}: {cleanTitle}
           </h4>
         </div>
 
-        <div className={`flex items-start ${tier === "spacious" ? "gap-3.5" : "gap-3"}`}>
+        <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0 space-y-1.5">
-            <ul className={listGap}>
+            <ul className="space-y-0.5">
               {points.map((point, pIdx) => (
                 <li key={pIdx} className="flex items-start gap-2">
-                  <span className={bulletDot} />
-                  <span className={bulletText}>{point}</span>
+                  <span className="mt-[6.5px] w-[5.5px] h-[5.5px] rounded-full bg-[#0284c7] shrink-0" />
+                  <span className="text-[12px] leading-[19.5px] text-slate-800 break-words">
+                    {point}
+                  </span>
                 </li>
               ))}
             </ul>
 
             {explicitHighlights && (
-              <div className={`flex items-start gap-1.5 ${highlightsClass} border-t border-slate-100`}>
-                <Sparkles className={highlightsIcon} />
+              <div className="flex items-start gap-1.5 text-[11.5px] leading-snug pt-1 border-t border-slate-100">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
                 <p className="text-slate-600">
                   <strong className="text-slate-800 font-bold">Highlights: </strong>
                   <span>{explicitHighlights}</span>
@@ -1773,9 +2024,7 @@ function DayTimelineItem({
           </div>
 
           {photo && (
-            <div
-              className={`${photoSize} shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-sm bg-slate-50`}
-            >
+            <div className="w-[46mm] h-[28mm] shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-sm bg-slate-50">
               <img
                 src={photo}
                 alt={day.title}
@@ -1955,17 +2204,21 @@ function PdfFieldRow({
   label,
   value,
   strong = false,
+  size = "normal",
 }: {
   label: string;
   value: string;
   strong?: boolean;
+  size?: "normal" | "large";
 }) {
   return (
     <div className="grid grid-cols-[82px_minmax(0,1fr)] gap-x-2 items-start">
       <span className="text-slate-500 font-medium text-[9.5px] leading-4">{label}</span>
       <span
-        className={`text-right text-[9.5px] leading-4 break-words ${
-          strong ? "font-black text-[#0f2942]" : "font-semibold text-slate-800"
+        className={`text-right break-words ${
+          size === "large"
+            ? "text-[11.5px] font-black text-[#0f2942] leading-snug"
+            : `text-[9.5px] leading-4 ${strong ? "font-black text-[#0f2942]" : "font-semibold text-slate-800"}`
         }`}
       >
         {value}
@@ -2206,16 +2459,27 @@ function FacebookSvg({ className = "w-3 h-3" }: { className?: string }) {
   );
 }
 
+function formatPdfDate(dateStr?: string) {
+  if (!dateStr) return "";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
 function formatPdfDateTime(dateStr?: string, defaultTime = "14:00") {
   if (!dateStr) return "";
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
-    const formattedDate = d.toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    const formattedDate = formatPdfDate(dateStr);
     const hours = String(d.getHours()).padStart(2, "0");
     const mins = String(d.getMinutes()).padStart(2, "0");
     const timeStr = `${hours}:${mins}` === "00:00" ? defaultTime : `${hours}:${mins}`;

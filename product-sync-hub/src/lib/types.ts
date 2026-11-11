@@ -60,6 +60,7 @@ export interface ItineraryHotel {
 export interface ItineraryTransport {
   id?: string;
   date: string;
+  toDate?: string;
   vehicleType: string;
   route: string;
   pickupTime: string;
@@ -155,6 +156,48 @@ export interface DetailedItinerary {
   exclusions: string[];
   clientNotes: string;
   created_at?: string;
+}
+
+export interface SavedQuotation {
+  id: string;
+  quotationRef: string;
+  quotationDate: string;
+  validUntilDate: string;
+  rateDisplayMode: "subtotal" | "full";
+  clientName: string;
+  clientEmail: string;
+  clientPhone: string;
+  clientAddress: string;
+  adults: string;
+  children: string;
+  infants: string;
+  roomsCount: string;
+  mealPlan: string;
+  packageType: "Full Package" | "Customized";
+  tripTitle: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  theme: string;
+  heroImage: string;
+  days: DetailedItineraryDay[];
+  hotels: ItineraryHotel[];
+  transports: ItineraryTransport[];
+  sightseeings: ItinerarySightseeing[];
+  flights: ItineraryFlight[];
+  trains: ItineraryTrain[];
+  otherServices: ItineraryService[];
+  inclusions: string[];
+  exclusions: string[];
+  clientNotes: string;
+  selectedTheme: string;
+  includeCoverPage: boolean;
+  gstRate: number;
+  tcsRate: number;
+  discountAmount: number;
+  finalQuotationTotal: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ItineraryDay {

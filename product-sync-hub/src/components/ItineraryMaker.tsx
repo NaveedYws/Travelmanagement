@@ -59,7 +59,9 @@ import {
   ItinerarySightseeing,
   ItineraryTrain,
   ItineraryService,
+  SavedQuotation,
 } from "@/lib/types";
+import { saveQuotation, SaveQuotationInput } from "@/lib/quotationStorage";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
@@ -91,32 +93,63 @@ const COLOR_THEMES = [
   { id: "slate", name: "Corporate Slate", color: "#334155", ring: "ring-slate-500", bg: "bg-slate-700" },
 ];
 
+const DEFAULT_TRANSPORT_INCLUSIONS = [
+  "Driver Allowance",
+  "Tolls & State Taxes",
+  "Fuel Charges",
+  "Parking Fees",
+];
+
+const PRESET_TRANSPORT_INCLUSIONS = [
+  ...DEFAULT_TRANSPORT_INCLUSIONS,
+  "State & Border Permits",
+  "Night Driving Charges",
+  "Airport / Station Transfers",
+  "All Sightseeing Transfers",
+  "24x7 Travel Assistance",
+];
+
+const createQuotationRef = () => {
+  const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `QT-${todayStr}-${Math.floor(100 + Math.random() * 900)}`;
+};
+
+const formatDisplayDate = (timestamp = Date.now()) =>
+  new Date(timestamp).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+
 export interface ItineraryMakerProps {
   trigger?: React.ReactNode;
   className?: string;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  initialQuotation?: SavedQuotation | null;
 }
 
-export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {}) {
+export function ItineraryMaker({
+  trigger,
+  className,
+  isOpen: controlledIsOpen,
+  onOpenChange,
+  initialQuotation,
+}: ItineraryMakerProps = {}) {
   const { user } = useAuth();
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledIsOpen !== undefined;
+  const isOpen = isControlled ? controlledIsOpen : internalOpen;
+  const setIsOpen = (val: boolean) => {
+    if (!isControlled) setInternalOpen(val);
+    onOpenChange?.(val);
+  };
   const [showPreview, setShowPreview] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Metadata
-  const [quotationRef] = useState(() => {
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-    return `QT-${todayStr}-${Math.floor(100 + Math.random() * 900)}`;
-  });
-  const [quotationDate] = useState(() =>
-    new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-  );
-  const [validUntilDate] = useState(() =>
-    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    })
+  const [quotationId, setQuotationId] = useState<string | null>(null);
+  const [quotationRef, setQuotationRef] = useState(createQuotationRef);
+  const [quotationDate, setQuotationDate] = useState(() => formatDisplayDate());
+  const [validUntilDate, setValidUntilDate] = useState(() =>
+    formatDisplayDate(Date.now() + 30 * 24 * 60 * 60 * 1000)
   );
 
   // Rate Display Mode Switch: "subtotal" (only show subtotal) vs "full" (full customized rate: hotel, transport, flight, airfare)
@@ -150,6 +183,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   const [children, setChildren] = useState("0");
   const [infants, setInfants] = useState("0");
   const [roomsCount, setRoomsCount] = useState("1");
+  const [mealPlan, setMealPlan] = useState("MAP (Breakfast & Dinner)");
   const [isEditingPax, setIsEditingPax] = useState(false);
 
   // 2. Package Overview (Blank clean start)
@@ -251,6 +285,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   const [editingTransportIndex, setEditingTransportIndex] = useState<number | null>(null);
   const [transportForm, setTransportForm] = useState<ItineraryTransport>({
     date: "",
+    toDate: "",
     vehicleType: "",
     route: "",
     pickupTime: "10:00 AM",
@@ -258,8 +293,53 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     notes: "",
     vehiclesCount: 1,
     price: 0,
-    inclusions: ["Driver Allowance", "Tolls & State Taxes", "Fuel Charges", "Parking Fees"],
+    inclusions: [...DEFAULT_TRANSPORT_INCLUSIONS],
   });
+  const [transportInclusionsOpen, setTransportInclusionsOpen] = useState(false);
+  const [newTransportInclusionInput, setNewTransportInclusionInput] = useState("");
+  const [customTransportInclusions, setCustomTransportInclusions] = useState<string[]>([]);
+  const transportInclusionsDropdownRef = useRef<HTMLDivElement>(null);
+
+  const availableTransportInclusions = useMemo(() => {
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    for (const item of [
+      ...PRESET_TRANSPORT_INCLUSIONS,
+      ...customTransportInclusions,
+      ...(transportForm.inclusions || []),
+    ]) {
+      const trimmed = item.trim();
+      const key = trimmed.toLowerCase();
+      if (trimmed && !seen.has(key)) {
+        seen.add(key);
+        merged.push(trimmed);
+      }
+    }
+    return merged;
+  }, [customTransportInclusions, transportForm.inclusions]);
+
+  useEffect(() => {
+    if (!transportInclusionsOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (
+        transportInclusionsDropdownRef.current &&
+        !transportInclusionsDropdownRef.current.contains(event.target as Node)
+      ) {
+        setTransportInclusionsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setTransportInclusionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [transportInclusionsOpen]);
 
   // 6. Sightseeing / Activities (Blank clean start)
   const [sightseeings, setSightseeings] = useState<ItinerarySightseeing[]>([]);
@@ -350,6 +430,123 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   const [isSaved, setIsSaved] = useState(false);
   const pdfRef = useRef<HTMLDivElement>(null);
   const wasDarkRef = useRef(false);
+
+  const resetForm = () => {
+    setQuotationId(null);
+    setQuotationRef(createQuotationRef());
+    setQuotationDate(formatDisplayDate());
+    setValidUntilDate(formatDisplayDate(Date.now() + 30 * 24 * 60 * 60 * 1000));
+    setRateDisplayMode("subtotal");
+    setClientName("");
+    setClientEmail("");
+    setClientPhone("");
+    setClientAddress("");
+    setAdults("2");
+    setChildren("0");
+    setInfants("0");
+    setRoomsCount("1");
+    setMealPlan("MAP (Breakfast & Dinner)");
+    setIsEditingPax(false);
+    setPackageType("Full Package");
+    setTripTitle("");
+    setDestination("");
+    setStartDate("");
+    setEndDate("");
+    setTheme("");
+    setHeroImage("");
+    setDays([]);
+    setEditingDayIndex(null);
+    setNewDayNumber(1);
+    setNewDayDestination("");
+    setNewDayTitle("");
+    setNewDayDescription("");
+    setNewDayImageUrl("");
+    setNewDayHighlights("");
+    setHotels([]);
+    setEditingHotelIndex(null);
+    setSelectedSavedHotelId("");
+    setTransports([]);
+    setEditingTransportIndex(null);
+    setSightseeings([]);
+    setFlights([]);
+    setTrains([]);
+    setOtherServices([]);
+    setEditingCustomIndex(null);
+    setInclusions([]);
+    setExclusions([]);
+    setClientNotes("");
+    setSelectedTheme("teal");
+    setIncludeCoverPage(false);
+    setGstRate(5);
+    setTcsRate(0);
+    setDiscountAmount(0);
+    setIsSaved(false);
+    setShowPreview(false);
+    setShowShareModal(false);
+    setMobileMenuOpen(false);
+  };
+
+  const loadQuotation = (q: SavedQuotation) => {
+    setQuotationId(q.id);
+    setQuotationRef(q.quotationRef || createQuotationRef());
+    setQuotationDate(q.quotationDate || formatDisplayDate());
+    setValidUntilDate(q.validUntilDate || formatDisplayDate(Date.now() + 30 * 24 * 60 * 60 * 1000));
+    setRateDisplayMode(q.rateDisplayMode || "subtotal");
+    setClientName(q.clientName || "");
+    setClientEmail(q.clientEmail || "");
+    setClientPhone(q.clientPhone || "");
+    setClientAddress(q.clientAddress || "");
+    setAdults(q.adults || "2");
+    setChildren(q.children || "0");
+    setInfants(q.infants || "0");
+    setRoomsCount(q.roomsCount || "1");
+    setMealPlan(q.mealPlan || "MAP (Breakfast & Dinner)");
+    setIsEditingPax(false);
+    setPackageType(q.packageType || "Full Package");
+    setTripTitle(q.tripTitle || "");
+    setDestination(q.destination || "");
+    setStartDate(q.startDate || "");
+    setEndDate(q.endDate || "");
+    setTheme(q.theme || "");
+    setHeroImage(q.heroImage || "");
+    const loadedDays = Array.isArray(q.days) ? q.days : [];
+    setDays(loadedDays);
+    setEditingDayIndex(null);
+    setNewDayNumber(loadedDays.length + 1);
+    setNewDayDestination("");
+    setNewDayTitle("");
+    setNewDayDescription("");
+    setNewDayImageUrl("");
+    setNewDayHighlights("");
+    setHotels(Array.isArray(q.hotels) ? q.hotels : []);
+    setEditingHotelIndex(null);
+    setSelectedSavedHotelId("");
+    setTransports(Array.isArray(q.transports) ? q.transports : []);
+    setEditingTransportIndex(null);
+    setSightseeings(Array.isArray(q.sightseeings) ? q.sightseeings : []);
+    setFlights(Array.isArray(q.flights) ? q.flights : []);
+    setTrains(Array.isArray(q.trains) ? q.trains : []);
+    setOtherServices(Array.isArray(q.otherServices) ? q.otherServices : []);
+    setEditingCustomIndex(null);
+    setInclusions(Array.isArray(q.inclusions) ? q.inclusions : []);
+    setExclusions(Array.isArray(q.exclusions) ? q.exclusions : []);
+    setClientNotes(q.clientNotes || "");
+    setSelectedTheme(q.selectedTheme || "teal");
+    setIncludeCoverPage(Boolean(q.includeCoverPage));
+    setGstRate(typeof q.gstRate === "number" ? q.gstRate : 5);
+    setTcsRate(typeof q.tcsRate === "number" ? q.tcsRate : 0);
+    setDiscountAmount(typeof q.discountAmount === "number" ? q.discountAmount : 0);
+    setIsSaved(true);
+    setShowPreview(false);
+    setShowShareModal(false);
+    setMobileMenuOpen(false);
+  };
+
+  useEffect(() => {
+    if (isOpen && initialQuotation) {
+      loadQuotation(initialQuotation);
+    }
+  }, [isOpen, initialQuotation]);
 
   // Auto-fit preview zoom based on device screen width
   useEffect(() => {
@@ -836,23 +1033,10 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
   };
 
   // Transport handlers
-  const handleSaveTransport = () => {
-    if (!transportForm.vehicleType.trim()) {
-      toast.error("Please specify Vehicle Type");
-      return;
-    }
-    if (editingTransportIndex !== null) {
-      const updated = [...transports];
-      updated[editingTransportIndex] = { ...transportForm };
-      setTransports(updated);
-      setEditingTransportIndex(null);
-      toast.success("Transport updated");
-    } else {
-      setTransports([...transports, { ...transportForm, id: `t-${Date.now()}` }]);
-      toast.success("Transport added");
-    }
+  const resetTransportForm = () => {
     setTransportForm({
       date: startDate || "",
+      toDate: endDate || "",
       vehicleType: "",
       route: "",
       pickupTime: "10:00 AM",
@@ -860,13 +1044,97 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       notes: "",
       vehiclesCount: 1,
       price: 0,
-      inclusions: ["Driver Allowance", "Tolls & State Taxes", "Fuel Charges", "Parking Fees"],
+      inclusions: [...DEFAULT_TRANSPORT_INCLUSIONS],
+    });
+    setNewTransportInclusionInput("");
+    setTransportInclusionsOpen(false);
+  };
+
+  const handleToggleTransportInclusion = (service: string) => {
+    const trimmed = service.trim();
+    if (!trimmed) return;
+    setTransportForm((prev) => {
+      const current = prev.inclusions || [];
+      const exists = current.some((item) => item.toLowerCase() === trimmed.toLowerCase());
+      return {
+        ...prev,
+        inclusions: exists
+          ? current.filter((item) => item.toLowerCase() !== trimmed.toLowerCase())
+          : [...current, trimmed],
+      };
     });
   };
 
+  const handleAddCustomTransportInclusion = () => {
+    const trimmed = newTransportInclusionInput.trim();
+    if (!trimmed) return;
+    const matchedExisting = availableTransportInclusions.find(
+      (item) => item.toLowerCase() === trimmed.toLowerCase()
+    );
+    const labelToUse = matchedExisting || trimmed;
+
+    if (!matchedExisting) {
+      setCustomTransportInclusions((prev) => [...prev, labelToUse]);
+    }
+    setTransportForm((prev) => {
+      const current = prev.inclusions || [];
+      if (current.some((item) => item.toLowerCase() === labelToUse.toLowerCase())) {
+        return prev;
+      }
+      return {
+        ...prev,
+        inclusions: [...current, labelToUse],
+      };
+    });
+    setNewTransportInclusionInput("");
+  };
+
+  const handleRemoveTransportInclusion = (service: string) => {
+    setTransportForm((prev) => ({
+      ...prev,
+      inclusions: (prev.inclusions || []).filter((item) => item !== service),
+    }));
+  };
+
+  const handleSaveTransport = () => {
+    if (!transportForm.vehicleType.trim()) {
+      toast.error("Please specify Vehicle Type");
+      return;
+    }
+    if (transportForm.date && transportForm.toDate && transportForm.toDate < transportForm.date) {
+      toast.error("To Date cannot be earlier than From Date");
+      return;
+    }
+    const payload: ItineraryTransport = {
+      ...transportForm,
+      toDate: transportForm.toDate || "",
+      inclusions: [...(transportForm.inclusions || [])],
+    };
+    if (editingTransportIndex !== null) {
+      const updated = [...transports];
+      updated[editingTransportIndex] = payload;
+      setTransports(updated);
+      setEditingTransportIndex(null);
+      toast.success("Transport updated");
+    } else {
+      setTransports([...transports, { ...payload, id: `t-${Date.now()}` }]);
+      toast.success("Transport added");
+    }
+    resetTransportForm();
+  };
+
   const handleEditTransport = (idx: number) => {
+    const selected = transports[idx];
     setEditingTransportIndex(idx);
-    setTransportForm(transports[idx]);
+    setTransportForm({
+      ...selected,
+      toDate: selected.toDate || "",
+      inclusions: Array.isArray(selected.inclusions)
+        ? [...selected.inclusions]
+        : [...DEFAULT_TRANSPORT_INCLUSIONS],
+    });
+    setTransportInclusionsOpen(false);
+    setNewTransportInclusionInput("");
     setSectionsOpen((p) => ({ ...p, transport: true }));
   };
 
@@ -889,6 +1157,9 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       endDate,
       adults,
       children,
+      infants,
+      rooms: roomsCount,
+      mealPlan,
       theme,
       colorTheme: selectedTheme,
       includeCoverPage,
@@ -927,6 +1198,9 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
       endDate,
       adults,
       children,
+      infants,
+      roomsCount,
+      mealPlan,
       theme,
       selectedTheme,
       includeCoverPage,
@@ -950,36 +1224,84 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
     ]
   );
 
-  // Save Quotation / Draft to API
+  const buildQuotationSnapshot = (): SaveQuotationInput => ({
+    ...(quotationId ? { id: quotationId } : {}),
+    quotationRef,
+    quotationDate,
+    validUntilDate,
+    rateDisplayMode,
+    clientName,
+    clientEmail,
+    clientPhone,
+    clientAddress,
+    adults,
+    children,
+    infants,
+    roomsCount,
+    mealPlan,
+    packageType,
+    tripTitle,
+    destination,
+    startDate,
+    endDate,
+    theme,
+    heroImage,
+    days,
+    hotels,
+    transports,
+    sightseeings,
+    flights,
+    trains,
+    otherServices,
+    inclusions: inclusions.filter((i) => i.trim()),
+    exclusions: exclusions.filter((e) => e.trim()),
+    clientNotes,
+    selectedTheme,
+    includeCoverPage,
+    gstRate,
+    tcsRate,
+    discountAmount,
+    finalQuotationTotal,
+  });
+
+  // Save Quotation / Draft locally & to API
   const handleSave = async () => {
-    if (!clientName || !tripTitle) {
-      toast.error("Please fill in Client Name and Trip Title");
+    if (!clientName.trim() && !tripTitle.trim()) {
+      toast.error("Please fill in Client Name or Trip Title");
       return;
     }
     setIsSaving(true);
     try {
-      await api.post("/api/itineraries/create.php", {
-        client_name: clientName,
-        trip_title: tripTitle,
-        destination,
-        start_date: startDate || null,
-        end_date: endDate || null,
-        adults: parseInt(adults) || 1,
-        children: parseInt(children) || 0,
-        theme,
-        final_rate: finalQuotationTotal,
-        days,
-        hotels,
-        transports,
-        flights,
-        sightseeings,
-        other_services: otherServices,
-        inclusions: inclusions.filter((i) => i.trim()),
-        exclusions: exclusions.filter((e) => e.trim()),
-        client_notes: clientNotes,
-      });
+      const savedLocal = saveQuotation(buildQuotationSnapshot());
+      setQuotationId(savedLocal.id);
       setIsSaved(true);
-      toast.success("Draft quotation saved successfully!");
+
+      try {
+        await api.post("/api/itineraries/create.php", {
+          client_name: clientName,
+          trip_title: tripTitle,
+          destination,
+          start_date: startDate || null,
+          end_date: endDate || null,
+          adults: parseInt(adults) || 1,
+          children: parseInt(children) || 0,
+          theme,
+          final_rate: finalQuotationTotal,
+          days,
+          hotels,
+          transports,
+          flights,
+          sightseeings,
+          other_services: otherServices,
+          inclusions: inclusions.filter((i) => i.trim()),
+          exclusions: exclusions.filter((e) => e.trim()),
+          client_notes: clientNotes,
+        });
+        toast.success("Quotation saved successfully!");
+      } catch (apiError) {
+        console.warn("Backend itinerary sync unavailable, saved locally:", apiError);
+        toast.success("Quotation saved to Last 5 Quotations!");
+      }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to save draft");
     } finally {
@@ -1141,6 +1463,22 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
 
       const filename = `${(clientName || "Quotation").replace(/\s+/g, "_")}_${(tripTitle || "Itinerary").slice(0, 30).replace(/\s+/g, "_")}.pdf`;
       pdf.save(filename);
+
+      const hasContent = Boolean(
+        clientName.trim() ||
+        tripTitle.trim() ||
+        destination.trim() ||
+        days.length > 0 ||
+        hotels.length > 0 ||
+        transports.length > 0 ||
+        subTotal > 0
+      );
+      if (hasContent) {
+        const savedLocal = saveQuotation(buildQuotationSnapshot());
+        setQuotationId(savedLocal.id);
+        setIsSaved(true);
+      }
+
       toast.success("Quotation PDF downloaded! (In mobile Office/Word, use 'Print Layout' mode)", { 
         id: toastId,
         duration: 5000,
@@ -1171,7 +1509,7 @@ export function ItineraryMaker({ trigger, className }: ItineraryMakerProps = {})
 👤 *Client:* ${clientName || "Valued Client"}
 📍 *Destination:* ${destination || "Not specified"}
 🗓️ *Duration:* ${duration} (${dateRange})
-👥 *Pax:* ${adults} Adults${parseInt(children) > 0 ? `, ${children} Child` : ""}${itemizedRates}
+👥 *Pax:* ${adults} Adults${parseInt(children) > 0 ? `, ${children} Child` : ""}${parseInt(infants) > 0 ? `, ${infants} Infant` : ""}${roomsCount ? ` · 🏨 *Rooms:* ${roomsCount}` : ""}${mealPlan ? ` · 🍽️ *Meal Plan:* ${mealPlan}` : ""}${itemizedRates}
 
 💰 *Quotation Total:* ₹${finalQuotationTotal.toLocaleString("en-IN")}
 (Inclusive of all specified services & applicable GST)
@@ -1198,13 +1536,20 @@ Thank you for choosing ${user?.company_name || "us"}!`;
     );
   };
 
+  const handleOpenFromTrigger = () => {
+    if (!initialQuotation && isSaved) {
+      resetForm();
+    }
+    setIsOpen(true);
+  };
+
   const triggerElement = trigger ? (
-    <div onClick={() => setIsOpen(true)} className={cn("inline-flex", className)}>
+    <div onClick={handleOpenFromTrigger} className={cn("inline-flex", className)}>
       {trigger}
     </div>
-  ) : (
+  ) : isControlled ? null : (
     <Button
-      onClick={() => setIsOpen(true)}
+      onClick={handleOpenFromTrigger}
       className={cn("bg-teal-700 hover:bg-teal-800 text-white gap-2 h-11 sm:h-12 px-5 sm:px-6 rounded-xl shadow-md shadow-teal-900/10 font-medium transition-all", className)}
     >
       <FileText className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
@@ -1475,7 +1820,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                     </div>
 
                     {isEditingPax ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
                         <div className="space-y-1">
                           <Label className="text-[11px] font-bold text-slate-600">Adults (12+ yrs)</Label>
                           <Input
@@ -1509,16 +1854,35 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         <div className="space-y-1">
                           <Label className="text-[11px] font-bold text-slate-600">Rooms Required</Label>
                           <Input
-                            type="number"
-                            min="1"
+                            type="text"
+                            placeholder="e.g. 2 Rooms or 1 Double Deluxe"
                             value={roomsCount}
                             onChange={(e) => setRoomsCount(e.target.value)}
                             className="h-9 bg-white"
                           />
                         </div>
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold text-slate-600">Meal Plan</Label>
+                          <Input
+                            type="text"
+                            placeholder="e.g. MAP (Breakfast & Dinner)"
+                            value={mealPlan}
+                            onChange={(e) => setMealPlan(e.target.value)}
+                            className="h-9 bg-white"
+                            list="pax-meal-plan-options"
+                          />
+                          <datalist id="pax-meal-plan-options">
+                            <option value="MAP (Breakfast & Dinner)" />
+                            <option value="CP (Breakfast Included)" />
+                            <option value="EP (Room Only / No Meals)" />
+                            <option value="AP (All Meals - B, L, D)" />
+                            <option value="MAPAI (Breakfast + Dinner + Taxes)" />
+                            <option value="CPAI (Breakfast + Taxes)" />
+                          </datalist>
+                        </div>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-xs">
                         <div>
                           <span className="text-slate-400 block font-medium">Adults</span>
                           <span className="text-sm font-bold text-slate-800">{adults} Adults</span>
@@ -1533,7 +1897,19 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         </div>
                         <div>
                           <span className="text-slate-400 block font-medium">Rooms</span>
-                          <span className="text-sm font-bold text-slate-800">{roomsCount} Room</span>
+                          <span className="text-sm font-bold text-slate-800 break-words">
+                            {roomsCount
+                              ? /^\d+$/.test(roomsCount.trim())
+                                ? `${roomsCount.trim()} Room${roomsCount.trim() === "1" ? "" : "s"}`
+                                : roomsCount
+                              : "1 Room"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block font-medium">Meal Plan</span>
+                          <span className="text-sm font-bold text-slate-800 break-words">
+                            {mealPlan || "MAP (Breakfast & Dinner)"}
+                          </span>
                         </div>
                       </div>
                     )}
@@ -2522,7 +2898,10 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       {editingTransportIndex !== null && (
                         <button
                           type="button"
-                          onClick={() => setEditingTransportIndex(null)}
+                          onClick={() => {
+                            setEditingTransportIndex(null);
+                            resetTransportForm();
+                          }}
                           className="text-xs text-rose-600 font-semibold hover:underline"
                         >
                           Cancel Edit
@@ -2552,49 +2931,181 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-bold text-slate-600">Route / Journey Coverage</Label>
+                      <Input
+                        placeholder="e.g. Airport -> Hotel -> Sightseeing"
+                        value={transportForm.route}
+                        onChange={(e) => setTransportForm({ ...transportForm, route: e.target.value })}
+                        className="h-10 bg-white text-xs"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="space-y-1">
-                        <Label className="text-[11px] font-bold text-slate-600">Route / Journey Coverage</Label>
+                        <Label htmlFor="transport-from-date" className="text-[11px] font-bold text-slate-600">
+                          From Date
+                        </Label>
                         <Input
-                          placeholder="e.g. Airport -> Hotel -> Sightseeing"
-                          value={transportForm.route}
-                          onChange={(e) => setTransportForm({ ...transportForm, route: e.target.value })}
+                          id="transport-from-date"
+                          type="date"
+                          value={transportForm.date}
+                          onChange={(e) => setTransportForm({ ...transportForm, date: e.target.value })}
                           className="h-10 bg-white text-xs"
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[11px] font-bold text-slate-600">Pickup Date & Time</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            type="date"
-                            value={transportForm.date}
-                            onChange={(e) => setTransportForm({ ...transportForm, date: e.target.value })}
-                            className="h-10 bg-white text-xs flex-1"
-                          />
-                          <Input
-                            placeholder="Time (10:00 AM)"
-                            value={transportForm.pickupTime}
-                            onChange={(e) => setTransportForm({ ...transportForm, pickupTime: e.target.value })}
-                            className="h-10 bg-white text-xs w-28"
-                          />
-                        </div>
+                        <Label htmlFor="transport-to-date" className="text-[11px] font-bold text-slate-600">
+                          To Date
+                        </Label>
+                        <Input
+                          id="transport-to-date"
+                          type="date"
+                          min={transportForm.date || undefined}
+                          value={transportForm.toDate || ""}
+                          onChange={(e) => setTransportForm({ ...transportForm, toDate: e.target.value })}
+                          className="h-10 bg-white text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="transport-pickup-time" className="text-[11px] font-bold text-slate-600">
+                          Pickup Time
+                        </Label>
+                        <Input
+                          id="transport-pickup-time"
+                          placeholder="Time (10:00 AM)"
+                          value={transportForm.pickupTime}
+                          onChange={(e) => setTransportForm({ ...transportForm, pickupTime: e.target.value })}
+                          className="h-10 bg-white text-xs"
+                        />
                       </div>
                     </div>
 
-                    {/* Inclusions badges / checks */}
-                    <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
-                      <Label className="text-[10px] font-bold uppercase text-slate-400">Included Services</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {["Driver Allowance", "Tolls & State Taxes", "Fuel Charges", "Parking Fees"].map((item) => (
-                          <span
-                            key={item}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            {item}
-                          </span>
-                        ))}
+                    {/* Included Services dropdown & manual add */}
+                    <div
+                      ref={transportInclusionsDropdownRef}
+                      className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-[10px] font-bold uppercase text-slate-400">Included Services</Label>
+                        <span className="text-[10px] font-semibold text-teal-700">
+                          {(transportForm.inclusions || []).length} selected
+                        </span>
                       </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="relative sm:w-64">
+                          <button
+                            type="button"
+                            aria-haspopup="listbox"
+                            aria-expanded={transportInclusionsOpen}
+                            aria-label="Included Services Dropdown"
+                            onClick={() => setTransportInclusionsOpen((prev) => !prev)}
+                            className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100/80 text-xs font-medium text-slate-700 flex items-center justify-between gap-2 transition-colors"
+                          >
+                            <span className="truncate">Select Included Services</span>
+                            <ChevronDown
+                              className={cn(
+                                "w-4 h-4 text-slate-400 transition-transform shrink-0",
+                                transportInclusionsOpen && "rotate-180"
+                              )}
+                            />
+                          </button>
+
+                          {transportInclusionsOpen && (
+                            <div
+                              role="listbox"
+                              aria-label="Included Services options"
+                              className="absolute left-0 right-0 sm:w-72 mt-1.5 z-30 rounded-xl border border-slate-200 bg-white shadow-lg p-1.5 max-h-60 overflow-y-auto space-y-0.5"
+                            >
+                              {availableTransportInclusions.map((option) => {
+                                const isSelected = (transportForm.inclusions || []).some(
+                                  (item) => item.toLowerCase() === option.toLowerCase()
+                                );
+                                return (
+                                  <button
+                                    key={option}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={isSelected}
+                                    onClick={() => handleToggleTransportInclusion(option)}
+                                    className={cn(
+                                      "w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-xs text-left transition-colors",
+                                      isSelected
+                                        ? "bg-emerald-50 text-emerald-800 font-semibold"
+                                        : "text-slate-700 hover:bg-slate-50"
+                                    )}
+                                  >
+                                    <span className="truncate">{option}</span>
+                                    <span
+                                      className={cn(
+                                        "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+                                        isSelected
+                                          ? "bg-emerald-600 border-emerald-600 text-white"
+                                          : "border-slate-300 bg-white"
+                                      )}
+                                    >
+                                      {isSelected && <Check className="w-3 h-3" />}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-1 gap-2">
+                          <Input
+                            placeholder="Add custom service manually (e.g. Border Permit)"
+                            aria-label="Manual Included Service"
+                            value={newTransportInclusionInput}
+                            onChange={(e) => setNewTransportInclusionInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddCustomTransportInclusion();
+                              }
+                            }}
+                            className="h-9 bg-slate-50 border-slate-200 text-xs flex-1"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleAddCustomTransportInclusion}
+                            className="h-9 px-3 text-xs font-semibold text-teal-700 border-teal-200 hover:bg-teal-50 shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5 mr-1" />
+                            Add
+                          </Button>
+                        </div>
+                      </div>
+
+                      {(transportForm.inclusions || []).length === 0 ? (
+                        <p className="text-[11px] text-slate-400 italic">
+                          No included services selected. Pick from the dropdown or add one manually above.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {(transportForm.inclusions || []).map((item) => (
+                            <span
+                              key={item}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100"
+                            >
+                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>{item}</span>
+                              <button
+                                type="button"
+                                aria-label={`Remove ${item}`}
+                                onClick={() => handleRemoveTransportInclusion(item)}
+                                className="text-emerald-600/70 hover:text-rose-600 transition-colors ml-0.5"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2656,8 +3167,23 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                               </div>
                               <p className="text-xs text-slate-600">{t.route}</p>
                               <p className="text-[11px] text-slate-400">
-                                Pickup: {t.date || "—"} at {t.pickupTime || "—"} · {t.notes}
+                                From: {t.date || "—"}
+                                {t.toDate ? ` to ${t.toDate}` : ""} · Pickup: {t.pickupTime || "—"}
+                                {t.notes ? ` · ${t.notes}` : ""}
                               </p>
+                              {t.inclusions && t.inclusions.length > 0 && (
+                                <div className="flex flex-wrap gap-1 pt-1">
+                                  {t.inclusions.map((inc, incIdx) => (
+                                    <span
+                                      key={incIdx}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                    >
+                                      <Check className="w-2.5 h-2.5" />
+                                      {inc}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
 
                             <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-slate-100">

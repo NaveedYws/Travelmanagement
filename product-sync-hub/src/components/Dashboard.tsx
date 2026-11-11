@@ -67,6 +67,8 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { SavedQuotation } from "@/lib/types";
+import { getRecentQuotations, QUOTATIONS_UPDATED_EVENT } from "@/lib/quotationStorage";
 
 const CATEGORY_CONFIG = {
   travel: { label: "Manage Packages", icon: Layers, itemName: "package", plural: "Packages", businessLabel: "Travel Agency & CRM" },
@@ -88,9 +90,25 @@ export function Dashboard() {
   const [dateFilter, setDateFilter] = useState<"today" | "7days" | "30days" | "month">("today");
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
   const [isUpdatingPass, setIsUpdatingPass] = useState(false);
+  const [recentQuotations, setRecentQuotations] = useState<SavedQuotation[]>(() => getRecentQuotations(5));
+  const [selectedQuotation, setSelectedQuotation] = useState<SavedQuotation | null>(null);
+  const [quotationEditorOpen, setQuotationEditorOpen] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const refreshQuotations = () => {
+      setRecentQuotations(getRecentQuotations(5));
+    };
+    refreshQuotations();
+    window.addEventListener(QUOTATIONS_UPDATED_EVENT, refreshQuotations);
+    window.addEventListener("storage", refreshQuotations);
+    return () => {
+      window.removeEventListener(QUOTATIONS_UPDATED_EVENT, refreshQuotations);
+      window.removeEventListener("storage", refreshQuotations);
+    };
+  }, []);
 
   const config = CATEGORY_CONFIG[businessType as keyof typeof CATEGORY_CONFIG] ?? CATEGORY_CONFIG.travel;
 
@@ -209,14 +227,8 @@ export function Dashboard() {
     });
   };
 
-  // Structured Sidebar Navigation Matching Image 2
+  // Structured Sidebar Navigation (WORKSPACE shows Last 5 Quotations separately)
   const navSections = [
-    {
-      title: "WORKSPACE",
-      items: [
-        { id: "dashboard" as const, label: "Overview", icon: TrendingUp },
-      ]
-    },
     {
       title: "CATALOG & CONTENT",
       items: [
@@ -918,6 +930,69 @@ export function Dashboard() {
 
         {/* Categorized Navigation */}
         <nav className="flex-1 px-3 py-3 space-y-4 overflow-y-auto">
+          {/* WORKSPACE: Last 5 Quotations (replaces Overview) */}
+          <div className="space-y-1">
+            <div className="px-3 flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+                WORKSPACE
+              </span>
+              <span className="text-[10px] font-semibold text-blue-400/90">
+                Last 5 Quotations
+              </span>
+            </div>
+            <div className="space-y-1 pt-1">
+              {recentQuotations.length === 0 ? (
+                <div className="px-3 py-2.5 rounded-xl border border-dashed border-slate-700/70 bg-slate-900/40 text-[11px] text-slate-400 leading-relaxed">
+                  No quotations yet. Create or download a quotation to see it here.
+                </div>
+              ) : (
+                recentQuotations.map((q) => {
+                  const isEditingThis = quotationEditorOpen && selectedQuotation?.id === q.id;
+                  return (
+                    <button
+                      key={q.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedQuotation(q);
+                        setQuotationEditorOpen(true);
+                        setSidebarOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-left transition-all cursor-pointer group",
+                        isEditingThis
+                          ? "bg-white/15 text-white"
+                          : "text-slate-300 hover:bg-white/10 hover:text-white"
+                      )}
+                      title={`${q.clientName || "Client"} — ${q.tripTitle || q.destination || q.quotationRef}`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <FileText className="w-4 h-4 shrink-0 text-blue-400/80 group-hover:text-blue-300 transition-colors" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-slate-200 group-hover:text-white truncate leading-tight">
+                            {q.clientName || q.tripTitle || "Untitled Quotation"}
+                          </p>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5 leading-tight">
+                            {q.clientName && q.tripTitle
+                              ? q.tripTitle
+                              : q.destination || q.quotationRef}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-1">
+                        {q.finalQuotationTotal > 0 && (
+                          <span className="text-[10px] font-semibold text-emerald-400 tabular-nums">
+                            ₹{q.finalQuotationTotal.toLocaleString("en-IN")}
+                          </span>
+                        )}
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 group-hover:translate-x-0.5 transition-all" />
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
           {navSections.map((sec, secIdx) => (
             <div key={secIdx} className="space-y-1">
               <span className="px-3 text-[10px] font-bold text-slate-400 tracking-wider">
@@ -1102,6 +1177,16 @@ export function Dashboard() {
           </div>
         </main>
       </div>
+
+      {/* Controlled Quotation Studio for reopening a recent quotation from the sidebar */}
+      <ItineraryMaker
+        isOpen={quotationEditorOpen}
+        onOpenChange={(open) => {
+          setQuotationEditorOpen(open);
+          if (!open) setSelectedQuotation(null);
+        }}
+        initialQuotation={selectedQuotation}
+      />
     </div>
   );
 }
