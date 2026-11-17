@@ -17,6 +17,8 @@ import {
   Globe,
   Layers,
   FileText,
+  Database,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +30,8 @@ import {
   DestinationItem,
   DestinationDayTemplate,
   getStoredDestinations,
+  fetchDestinationsFromDb,
+  syncDestinationsToDatabase,
   saveDestination,
   deleteDestination,
   addDayToDestination,
@@ -63,6 +67,7 @@ export function DestinationManager({
   const [destinations, setDestinations] = useState<DestinationItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedDestId, setExpandedDestId] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // New/Edit Destination Dialog
   const [isDestModalOpen, setIsDestModalOpen] = useState(false);
@@ -94,12 +99,47 @@ export function DestinationManager({
   useEffect(() => {
     loadData();
 
+    // Fetch and sync from database
+    setIsSyncing(true);
+    fetchDestinationsFromDb()
+      .then((items) => {
+        if (items && items.length > 0) {
+          setDestinations(items);
+          if (!expandedDestId) {
+            setExpandedDestId(items[0].id);
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not load destinations from database:", err);
+      })
+      .finally(() => {
+        setIsSyncing(false);
+      });
+
     const handleUpdate = () => {
       setDestinations(getStoredDestinations());
     };
     window.addEventListener("destination_library_updated", handleUpdate);
     return () => window.removeEventListener("destination_library_updated", handleUpdate);
   }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await syncDestinationsToDatabase();
+      if (res.success) {
+        toast.success(`Successfully saved ${res.count} destinations to database!`);
+        loadData();
+      } else {
+        toast.error(res.error || "Could not sync to database.");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Database sync failed");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const filteredDestinations = destinations.filter((d) => {
     const query = searchQuery.toLowerCase().trim();
@@ -288,7 +328,20 @@ export function DestinationManager({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="text-xs h-9 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/50"
+            title="Sync all destinations to the MySQL database"
+          >
+            <Database className={`w-3.5 h-3.5 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Syncing DB..." : "Save to DB"}
+          </Button>
+
           <Button
             type="button"
             variant="outline"

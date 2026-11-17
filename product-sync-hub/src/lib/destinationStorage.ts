@@ -1,3 +1,5 @@
+import { api } from "./api";
+
 export interface DestinationDayTemplate {
   id: string;
   dayNumber: number;
@@ -345,12 +347,141 @@ export function getStoredDestinations(): DestinationItem[] {
   }
 }
 
-function persistDestinations(destinations: DestinationItem[]) {
+export function persistDestinations(destinations: DestinationItem[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(destinations));
     window.dispatchEvent(new CustomEvent("destination_library_updated", { detail: destinations }));
   } catch (err) {
     console.error("Failed to persist destinations", err);
+  }
+}
+
+/**
+ * Background async save to database API
+ */
+async function apiSaveDestination(dest: DestinationItem): Promise<DestinationItem | null> {
+  const token = localStorage.getItem("token");
+  if (!token) return null;
+
+  try {
+    const isNumericId = dest.id && /^\d+$/.test(dest.id);
+    if (isNumericId) {
+      const res = await api.put<{ status: string; id?: string; destination?: DestinationItem }>("/api/destinations/index.php", dest);
+      return res?.destination || dest;
+    } else {
+      const res = await api.post<{ status: string; id?: string; destination?: DestinationItem }>("/api/destinations/index.php", dest);
+      if (res?.id && res.id !== dest.id) {
+        // Update local item with database numeric ID
+        const current = getStoredDestinations();
+        const idx = current.findIndex((d) => d.id === dest.id);
+        if (idx !== -1) {
+          current[idx] = { ...current[idx], id: res.id };
+          persistDestinations(current);
+        }
+      }
+      return res?.destination || { ...dest, id: res?.id || dest.id };
+    }
+  } catch (err) {
+    console.warn("Database sync for destination failed (cached locally):", err);
+    return null;
+  }
+}
+
+/**
+ * Background async delete from database API
+ */
+async function apiDeleteDestination(id: string): Promise<boolean> {
+  const token = localStorage.getItem("token");
+  if (!token) return false;
+
+  try {
+    if (/^\d+$/.test(id)) {
+      await api.delete(`/api/destinations/index.php?id=${encodeURIComponent(id)}`);
+    }
+    return true;
+  } catch (err) {
+    console.warn("Database delete for destination failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Fetches all destinations from the database.
+ * If database is empty, auto-syncs local/default destinations into the database.
+ */
+export async function fetchDestinationsFromDb(): Promise<DestinationItem[]> {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    return getStoredDestinations();
+  }
+
+  try {
+    const res = await api.get<{ destinations: DestinationItem[] }>("/api/destinations/index.php");
+    if (res && Array.isArray(res.destinations)) {
+      if (res.destinations.length > 0) {
+        persistDestinations(res.destinations);
+        return res.destinations;
+      } else {
+        // Database is empty for this user: auto-seed from local library into database
+        const local = getStoredDestinations();
+        if (local.length > 0) {
+          await syncDestinationsToDatabase(local);
+        }
+        return local;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch destinations from database, falling back to local cache:", err);
+  }
+
+  return getStoredDestinations();
+}
+
+/**
+ * Syncs an array of destinations to the database in batch.
+ */
+export async function syncDestinationsToDatabase(items?: DestinationItem[]): Promise<{ success: boolean; count: number; error?: string }> {
+  const token = localStorage.getItem("token");
+  if (!token) return { success: false, count: 0, error: "Please log in to sync destinations with database" };
+
+  const toSync = items || getStoredDestinations();
+  if (toSync.length === 0) return { success: true, count: 0 };
+
+  try {
+    const res = await api.post<{ status: string; destinations?: DestinationItem[] }>("/api/destinations/index.php", {
+      destinations: toSync.map((d) => ({
+        name: d.name,
+        stateOrCountry: d.stateOrCountry || "",
+        coverImage: d.coverImage || "",
+        description: d.description || "",
+        days: d.days || [],
+      })),
+    });
+
+    if (res.destinations && res.destinations.length > 0) {
+      persistDestinations(res.destinations);
+      return { success: true, count: res.destinations.length };
+    }
+    return { success: true, count: toSync.length };
+  } catch (batchErr: any) {
+    // Fallback: If server is still running older single-item endpoint, save one-by-one
+    try {
+      let savedCount = 0;
+      for (const d of toSync) {
+        await api.post("/api/destinations/index.php", {
+          name: d.name,
+          stateOrCountry: d.stateOrCountry || "",
+          coverImage: d.coverImage || "",
+          description: d.description || "",
+          days: d.days || [],
+        });
+        savedCount++;
+      }
+      return { success: true, count: savedCount };
+    } catch (fallbackErr: any) {
+      console.error("Failed to sync destinations to database:", fallbackErr);
+      return { success: false, count: 0, error: fallbackErr?.message || batchErr?.message || "Failed to sync destinations" };
+    }
   }
 }
 
@@ -379,12 +510,15 @@ export function saveDestination(item: {
       };
       current[idx] = updated;
       persistDestinations(current);
+
+      // Save to database asynchronously
+      apiSaveDestination(updated);
       return updated;
     }
   }
 
-  // Create new
-  const newId = `dest-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  // Create new destination
+  const newId = item.id || `dest-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const created: DestinationItem = {
     id: newId,
     name: item.name.trim(),
@@ -398,6 +532,9 @@ export function saveDestination(item: {
 
   const next = [created, ...current];
   persistDestinations(next);
+
+  // Save to database asynchronously
+  apiSaveDestination(created);
   return created;
 }
 
@@ -405,6 +542,9 @@ export function deleteDestination(id: string): void {
   const current = getStoredDestinations();
   const next = current.filter((d) => d.id !== id);
   persistDestinations(next);
+
+  // Delete from database asynchronously
+  apiDeleteDestination(id);
 }
 
 export function addDayToDestination(
@@ -437,6 +577,9 @@ export function addDayToDestination(
 
   current[destIndex] = updatedDest;
   persistDestinations(current);
+
+  // Persist updated days to database asynchronously
+  apiSaveDestination(updatedDest);
   return updatedDest;
 }
 
@@ -463,6 +606,9 @@ export function updateDayInDestination(
 
   current[destIndex] = updatedDest;
   persistDestinations(current);
+
+  // Persist updated days to database asynchronously
+  apiSaveDestination(updatedDest);
   return updatedDest;
 }
 
@@ -484,10 +630,14 @@ export function deleteDayFromDestination(destinationId: string, dayId: string): 
 
   current[destIndex] = updatedDest;
   persistDestinations(current);
+
+  // Persist updated days to database asynchronously
+  apiSaveDestination(updatedDest);
   return updatedDest;
 }
 
 export function resetDestinationsToDefaults(): DestinationItem[] {
   persistDestinations(DEFAULT_DESTINATIONS);
+  syncDestinationsToDatabase(DEFAULT_DESTINATIONS);
   return DEFAULT_DESTINATIONS;
 }

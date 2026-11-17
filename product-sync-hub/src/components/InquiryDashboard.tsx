@@ -567,10 +567,32 @@ export function InquiryDashboard() {
                               <span className="truncate">{inq.email}</span>
                             </a>
                           )}
-                          {inq.address && (
+                          {inq.destination && (
+                            <div className="text-foreground font-medium flex items-center gap-1 truncate max-w-[170px]" title={`Destination: ${inq.destination}`}>
+                              <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
+                              <span className="truncate">{inq.destination}</span>
+                            </div>
+                          )}
+                          {!inq.destination && inq.address && (
                             <div className="text-muted-foreground flex items-center gap-1 truncate max-w-[170px]">
                               <MapPin className="w-3 h-3 shrink-0" />
                               <span className="truncate">{inq.address}</span>
+                            </div>
+                          )}
+                          {(inq.arrival_date || inq.pax) && (
+                            <div className="text-[11px] text-muted-foreground flex items-center gap-2 truncate max-w-[170px]">
+                              {inq.arrival_date && (
+                                <span className="flex items-center gap-1">
+                                  <CalendarIcon className="w-2.5 h-2.5" />
+                                  {inq.arrival_date}
+                                </span>
+                              )}
+                              {inq.pax && (
+                                <span className="flex items-center gap-1">
+                                  <Users className="w-2.5 h-2.5" />
+                                  {inq.pax}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -726,10 +748,34 @@ export function InquiryDashboard() {
                     </div>
                   )}
 
-                  {inq.address && (
+                  {inq.destination && (
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                      <MapPin className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span className="truncate">{inq.destination}</span>
+                    </div>
+                  )}
+
+                  {!inq.destination && inq.address && (
                     <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
                       <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                       <span className="line-clamp-1">{inq.address}</span>
+                    </div>
+                  )}
+
+                  {(inq.arrival_date || inq.pax) && (
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      {inq.arrival_date && (
+                        <span className="flex items-center gap-1">
+                          <CalendarIcon className="w-3 h-3 text-muted-foreground" />
+                          {inq.arrival_date}
+                        </span>
+                      )}
+                      {inq.pax && (
+                        <span className="flex items-center gap-1">
+                          <Users className="w-3 h-3 text-muted-foreground" />
+                          {inq.pax}
+                        </span>
+                      )}
                     </div>
                   )}
 
@@ -855,7 +901,31 @@ export function InquiryDashboard() {
                   </div>
                 )}
 
-                {selectedLead.address && (
+                {/* Travel Inquiry Details (Destination, Arrival Date, Pax) */}
+                {(selectedLead.destination || selectedLead.arrival_date || selectedLead.pax) && (
+                  <div className="grid grid-cols-3 gap-2.5 p-3 rounded-lg border bg-blue-50/50 dark:bg-blue-950/30 border-blue-200/60 dark:border-blue-900/60 text-xs">
+                    {selectedLead.destination && (
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Destination</p>
+                        <p className="font-bold text-blue-600 dark:text-blue-400 truncate mt-0.5">{selectedLead.destination}</p>
+                      </div>
+                    )}
+                    {selectedLead.arrival_date && (
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Arrival Date</p>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 truncate mt-0.5">{selectedLead.arrival_date}</p>
+                      </div>
+                    )}
+                    {selectedLead.pax && (
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Travelers (Pax)</p>
+                        <p className="font-semibold text-slate-800 dark:text-slate-200 truncate mt-0.5">{selectedLead.pax}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedLead.address && !selectedLead.destination && (
                   <div className="flex items-start gap-2 p-2.5 rounded-lg border">
                     <MapPin className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                     <span className="text-muted-foreground">{selectedLead.address}</span>

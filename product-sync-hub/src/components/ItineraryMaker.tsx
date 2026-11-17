@@ -60,6 +60,7 @@ import {
   ItineraryTrain,
   ItineraryService,
   SavedQuotation,
+  QuotationLeadStatus,
 } from "@/lib/types";
 import { saveQuotation, SaveQuotationInput } from "@/lib/quotationStorage";
 import { toast } from "sonner";
@@ -70,9 +71,17 @@ import { useAuth } from "@/hooks/useAuth";
 import { ItineraryPdfDocument, ItineraryPdfData } from "./ItineraryPdfDocument";
 import { cn } from "@/lib/utils";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   DestinationItem,
   DestinationDayTemplate,
   getStoredDestinations,
+  fetchDestinationsFromDb,
   addDayToDestination,
   saveDestination,
 } from "@/lib/destinationStorage";
@@ -80,6 +89,7 @@ import { DestinationManager } from "./DestinationManager";
 import {
   HotelItem,
   getStoredHotels,
+  fetchHotelsFromDb,
 } from "@/lib/hotelStorage";
 import { HotelManager } from "./HotelManager";
 
@@ -155,6 +165,10 @@ export function ItineraryMaker({
   // Rate Display Mode Switch: "subtotal" (only show subtotal) vs "full" (full customized rate: hotel, transport, flight, airfare)
   const [rateDisplayMode, setRateDisplayMode] = useState<"subtotal" | "full">("subtotal");
 
+  // Amount Mode Switch: "calculated" (auto-calculated from services + taxes) vs "manual" (direct custom amount)
+  const [amountMode, setAmountMode] = useState<"calculated" | "manual">("calculated");
+  const [manualAmount, setManualAmount] = useState<string>("");
+
   // Section collapse states
   const [sectionsOpen, setSectionsOpen] = useState({
     customer: true,
@@ -179,6 +193,7 @@ export function ItineraryMaker({
   const [clientEmail, setClientEmail] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [clientAddress, setClientAddress] = useState("");
+  const [quotationStatus, setQuotationStatus] = useState<QuotationLeadStatus>("In Progress");
   const [adults, setAdults] = useState("2");
   const [children, setChildren] = useState("0");
   const [infants, setInfants] = useState("0");
@@ -219,6 +234,7 @@ export function ItineraryMaker({
       setDestLibrary(items);
     };
     load();
+    fetchDestinationsFromDb().catch(() => {});
     window.addEventListener("destination_library_updated", load);
     return () => window.removeEventListener("destination_library_updated", load);
   }, []);
@@ -266,6 +282,7 @@ export function ItineraryMaker({
       setSavedHotels(items);
     };
     loadHotels();
+    fetchHotelsFromDb().catch(() => {});
     window.addEventListener("hotel_library_updated", loadHotels);
     return () => window.removeEventListener("hotel_library_updated", loadHotels);
   }, []);
@@ -437,10 +454,13 @@ export function ItineraryMaker({
     setQuotationDate(formatDisplayDate());
     setValidUntilDate(formatDisplayDate(Date.now() + 30 * 24 * 60 * 60 * 1000));
     setRateDisplayMode("subtotal");
+    setAmountMode("calculated");
+    setManualAmount("");
     setClientName("");
     setClientEmail("");
     setClientPhone("");
     setClientAddress("");
+    setQuotationStatus("In Progress");
     setAdults("2");
     setChildren("0");
     setInfants("0");
@@ -492,10 +512,20 @@ export function ItineraryMaker({
     setQuotationDate(q.quotationDate || formatDisplayDate());
     setValidUntilDate(q.validUntilDate || formatDisplayDate(Date.now() + 30 * 24 * 60 * 60 * 1000));
     setRateDisplayMode(q.rateDisplayMode || "subtotal");
+    setAmountMode(q.amountMode === "manual" ? "manual" : "calculated");
+    setManualAmount(
+      q.manualAmount !== undefined
+        ? q.manualAmount
+        : q.amountMode === "manual"
+          ? String(q.finalQuotationTotal || "")
+          : ""
+    );
     setClientName(q.clientName || "");
     setClientEmail(q.clientEmail || "");
     setClientPhone(q.clientPhone || "");
     setClientAddress(q.clientAddress || "");
+    const loadedStatus = (q.status as QuotationLeadStatus) || "In Progress";
+    setQuotationStatus(loadedStatus === "Cancel" ? "Canceled" : loadedStatus);
     setAdults(q.adults || "2");
     setChildren(q.children || "0");
     setInfants(q.infants || "0");
@@ -625,11 +655,31 @@ export function ItineraryMaker({
   const gstAmount = useMemo(() => Math.round((subTotal * gstRate) / 100), [subTotal, gstRate]);
   const tcsAmount = useMemo(() => Math.round((subTotal * tcsRate) / 100), [subTotal, tcsRate]);
 
-  // Final Quotation Total
-  const finalQuotationTotal = useMemo(() => {
+  // Auto-calculated total from services + taxes - discount
+  const calculatedQuotationTotal = useMemo(() => {
     const tot = subTotal + gstAmount + tcsAmount - (Number(discountAmount) || 0);
     return Math.max(0, tot);
   }, [subTotal, gstAmount, tcsAmount, discountAmount]);
+
+  // Final Quotation Total (either auto-calculated or manually edited)
+  const finalQuotationTotal = useMemo(() => {
+    if (amountMode === "manual") {
+      const parsed = Number(manualAmount);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+    return calculatedQuotationTotal;
+  }, [amountMode, manualAmount, calculatedQuotationTotal]);
+
+  const handleToggleAmountMode = (useEditMode: boolean) => {
+    if (useEditMode) {
+      if (manualAmount === "" && calculatedQuotationTotal > 0) {
+        setManualAmount(String(calculatedQuotationTotal));
+      }
+      setAmountMode("manual");
+    } else {
+      setAmountMode("calculated");
+    }
+  };
 
   // Breakdown metrics for top summary bar matching screenshot
   const numAdults = Math.max(1, parseInt(adults) || 1);
@@ -1230,6 +1280,8 @@ export function ItineraryMaker({
     quotationDate,
     validUntilDate,
     rateDisplayMode,
+    amountMode,
+    manualAmount,
     clientName,
     clientEmail,
     clientPhone,
@@ -1262,6 +1314,7 @@ export function ItineraryMaker({
     tcsRate,
     discountAmount,
     finalQuotationTotal,
+    status: quotationStatus || "In Progress",
   });
 
   // Save Quotation / Draft locally & to API
@@ -1300,7 +1353,7 @@ export function ItineraryMaker({
         toast.success("Quotation saved successfully!");
       } catch (apiError) {
         console.warn("Backend itinerary sync unavailable, saved locally:", apiError);
-        toast.success("Quotation saved to Last 5 Quotations!");
+        toast.success("Quotation saved to Last 10 Quotations!");
       }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to save draft");
@@ -1471,7 +1524,8 @@ export function ItineraryMaker({
         days.length > 0 ||
         hotels.length > 0 ||
         transports.length > 0 ||
-        subTotal > 0
+        subTotal > 0 ||
+        finalQuotationTotal > 0
       );
       if (hasContent) {
         const savedLocal = saveQuotation(buildQuotationSnapshot());
@@ -1494,7 +1548,7 @@ export function ItineraryMaker({
     }
   };
 
-  // Share message composer for WhatsApp respecting rateDisplayMode
+  // Share message composer for WhatsApp respecting rateDisplayMode and finalQuotationTotal
   const getShareText = () => {
     const itemizedRates =
       rateDisplayMode === "full"
@@ -1760,7 +1814,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold text-slate-600">Full Name</Label>
                       <Input
@@ -1797,6 +1851,25 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         placeholder="e.g. Mumbai, India"
                         className="h-10 rounded-xl border-slate-200"
                       />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold text-slate-600">Lead Status</Label>
+                      <Select
+                        value={quotationStatus}
+                        onValueChange={(val) => setQuotationStatus(val as QuotationLeadStatus)}
+                      >
+                        <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white font-medium text-xs">
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="In Progress">In Progress</SelectItem>
+                          <SelectItem value="Hold">Hold</SelectItem>
+                          <SelectItem value="Converted">Converted</SelectItem>
+                          <SelectItem value="Active">Active</SelectItem>
+                          <SelectItem value="Completed">Completed</SelectItem>
+                          <SelectItem value="Canceled">Canceled</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
@@ -4004,11 +4077,16 @@ Thank you for choosing ${user?.company_name || "us"}!`;
 
             {/* --- FINAL PRICE BREAKDOWN SUMMARY CARD MATCHING SCREENSHOT --- */}
             <Card className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Price Breakdown</h3>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-100">
-                  {rateDisplayMode === "subtotal" ? "Subtotal Only Mode" : "Full Itemized Mode"}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-100">
+                    {rateDisplayMode === "subtotal" ? "Subtotal Only Mode" : "Full Itemized Mode"}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-100">
+                    {amountMode === "manual" ? "Edit Amount Mode" : "Cal Amount Mode"}
+                  </span>
+                </div>
               </div>
 
               <div className="space-y-2 text-xs sm:text-sm">
@@ -4092,22 +4170,46 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                     <span>-₹{discountAmount.toLocaleString("en-IN")}</span>
                   </div>
                 )}
+                {amountMode === "manual" && calculatedQuotationTotal > 0 && (
+                  <div className="flex justify-between items-center text-slate-400 text-xs">
+                    <span>Calculated Amount (Reference)</span>
+                    <span>₹{calculatedQuotationTotal.toLocaleString("en-IN")}</span>
+                  </div>
+                )}
               </div>
 
               {/* Total Row */}
-              <div className="pt-3 border-t-2 border-slate-100 flex items-center justify-between">
+              <div className="pt-3 border-t-2 border-slate-100 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs uppercase font-bold text-slate-400">Total Quotation Price</p>
-                  <p className="text-[11px] text-slate-400">Tax & services included</p>
+                  <p className="text-[11px] text-slate-400">
+                    {amountMode === "manual" ? "Custom edited amount" : "Tax & services included"}
+                  </p>
                 </div>
-                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                  ₹{finalQuotationTotal.toLocaleString("en-IN")}
-                </span>
+                {amountMode === "manual" ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xl sm:text-2xl font-black text-slate-500">₹</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={manualAmount}
+                      onChange={(e) => setManualAmount(e.target.value)}
+                      placeholder="0"
+                      aria-label="Edit Total Quotation Price"
+                      className="w-36 sm:w-44 h-11 text-right text-xl sm:text-2xl font-black text-slate-900 border-teal-300 focus-visible:ring-teal-500 bg-teal-50/30 rounded-xl"
+                    />
+                  </div>
+                ) : (
+                  <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+                    ₹{finalQuotationTotal.toLocaleString("en-IN")}
+                  </span>
+                )}
               </div>
 
-              {/* Action Buttons: Switch replacing Update Quotation + Send to Customer */}
+              {/* Mode Switches: Subtotal/Full Rate + Cal Amount/Edit Amount */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
-                {/* Switch replacing Update Quotation button */}
+                {/* Switch between Only Show Subtotal and Full Customized Rate */}
                 <div className="h-12 rounded-xl bg-slate-50 border border-slate-200 px-3.5 flex items-center justify-between gap-2 shadow-sm">
                   <div className="flex flex-col min-w-0">
                     <span className="text-xs font-bold text-slate-800 truncate">
@@ -4144,27 +4246,64 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                   </div>
                 </div>
 
-                {/* Send to Customer + Quick Save Button */}
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => setShowShareModal(true)}
-                    className="flex-1 bg-teal-800 hover:bg-teal-900 text-white font-bold h-12 rounded-xl gap-2 shadow-sm"
-                  >
-                    <Share2 className="w-4 h-4" />
-                    <span>Send to Customer</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    title="Save Quotation"
-                    variant="outline"
-                    className="h-12 w-12 rounded-xl border-slate-200 text-slate-700 hover:bg-teal-50 hover:text-teal-800 hover:border-teal-300 shrink-0 p-0 flex items-center justify-center transition-all"
-                  >
-                    <Save className="w-4 h-4" />
-                  </Button>
+                {/* Switch between Calculated Amount and Edited Amount */}
+                <div className="h-12 rounded-xl bg-slate-50 border border-slate-200 px-3.5 flex items-center justify-between gap-2 shadow-sm">
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-bold text-slate-800 truncate">
+                      {amountMode === "manual" ? "Edit Amount" : "Cal Amount"}
+                    </span>
+                    <span className="text-[10px] text-slate-400 truncate">
+                      {amountMode === "manual"
+                        ? "Enter custom quotation total"
+                        : "Auto-calculated from services"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span
+                      className={cn(
+                        "text-[10px] font-bold uppercase tracking-wider hidden sm:inline",
+                        amountMode === "calculated" ? "text-teal-700 font-black" : "text-slate-400"
+                      )}
+                    >
+                      Cal Amount
+                    </span>
+                    <Switch
+                      checked={amountMode === "manual"}
+                      onCheckedChange={handleToggleAmountMode}
+                      aria-label="Toggle Cal Amount or Edit Amount"
+                    />
+                    <span
+                      className={cn(
+                        "text-[10px] font-bold uppercase tracking-wider hidden sm:inline",
+                        amountMode === "manual" ? "text-teal-700 font-black" : "text-slate-400"
+                      )}
+                    >
+                      Edit Amount
+                    </span>
+                  </div>
                 </div>
+              </div>
+
+              {/* Action Buttons: Send to Customer + Quick Save Button */}
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={() => setShowShareModal(true)}
+                  className="flex-1 bg-teal-800 hover:bg-teal-900 text-white font-bold h-12 rounded-xl gap-2 shadow-sm"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>Send to Customer</span>
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  title="Save Quotation"
+                  variant="outline"
+                  className="h-12 w-12 rounded-xl border-slate-200 text-slate-700 hover:bg-teal-50 hover:text-teal-800 hover:border-teal-300 shrink-0 p-0 flex items-center justify-center transition-all"
+                >
+                  <Save className="w-4 h-4" />
+                </Button>
               </div>
 
               <div className="flex items-center justify-center pt-2">
@@ -4376,8 +4515,10 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                 <span className="text-teal-700">₹{finalQuotationTotal.toLocaleString("en-IN")}</span>
               </div>
               <p className="text-slate-500">Recipient: {clientName || "Client"} ({clientPhone || clientEmail || "No contact specified"})</p>
-              <div className="pt-1 text-[11px] text-teal-700 font-semibold">
-                Rate Mode: {rateDisplayMode === "subtotal" ? "Subtotal Only (Lump sum)" : "Full Itemized Breakdown"}
+              <div className="pt-1 text-[11px] text-teal-700 font-semibold flex flex-wrap gap-x-2 gap-y-0.5">
+                <span>Rate Mode: {rateDisplayMode === "subtotal" ? "Subtotal Only (Lump sum)" : "Full Itemized Breakdown"}</span>
+                <span>·</span>
+                <span>Amount Mode: {amountMode === "manual" ? "Edited Amount (Custom)" : "Calculated Amount"}</span>
               </div>
             </div>
 

@@ -12,6 +12,9 @@ import { HotelForm } from "./HotelForm";
 import { BlogForm } from "./BlogForm";
 import { BlogManager } from "./BlogManager";
 import { InquiryDashboard } from "./InquiryDashboard";
+import { LeadBoard } from "./LeadBoard";
+import { PaymentDetails } from "./PaymentDetails";
+import { RecentQuotationsPage } from "./RecentQuotationsPage";
 import { AdminUsers } from "./AdminUsers";
 import { BulkImport } from "./BulkImport";
 import { ItineraryMaker } from "./ItineraryMaker";
@@ -47,6 +50,8 @@ import {
   ShieldCheck, 
   Activity, 
   Layers, 
+  Kanban, 
+  CreditCard, 
   Compass, 
   ArrowUpRight, 
   ChevronRight, 
@@ -68,7 +73,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { SavedQuotation } from "@/lib/types";
-import { getRecentQuotations, QUOTATIONS_UPDATED_EVENT } from "@/lib/quotationStorage";
+import { getRecentQuotations, getStoredQuotations, QUOTATIONS_UPDATED_EVENT } from "@/lib/quotationStorage";
 
 const CATEGORY_CONFIG = {
   travel: { label: "Manage Packages", icon: Layers, itemName: "package", plural: "Packages", businessLabel: "Travel Agency & CRM" },
@@ -83,14 +88,30 @@ export function Dashboard() {
   const { blogs, addBlog } = useBlogs(user?.id);
 
   const activeInquiryCount = inquiries.filter((i) => i.status === "new" || i.status === "contacted").length;
-  const [activeView, setActiveView] = useState<"dashboard" | "manage" | "blogs" | "inquiries" | "destinations" | "hotels" | "settings" | "admin">("dashboard");
+  const [activeView, setActiveView] = useState<
+    | "dashboard"
+    | "manage"
+    | "blogs"
+    | "inquiries"
+    | "lead-board"
+    | "payments"
+    | "destinations"
+    | "hotels"
+    | "settings"
+    | "admin"
+    | "last-quotations"
+  >("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [dateFilter, setDateFilter] = useState<"today" | "7days" | "30days" | "month">("today");
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
   const [isUpdatingPass, setIsUpdatingPass] = useState(false);
-  const [recentQuotations, setRecentQuotations] = useState<SavedQuotation[]>(() => getRecentQuotations(5));
+  const [recentQuotations, setRecentQuotations] = useState<SavedQuotation[]>(() => getRecentQuotations(10));
+  const [storedQuotationsCount, setStoredQuotationsCount] = useState<number>(() => getStoredQuotations().length);
+  const [recordedPaymentsCount, setRecordedPaymentsCount] = useState<number>(
+    () => getStoredQuotations().filter((q) => q.paymentRecorded === true).length
+  );
   const [selectedQuotation, setSelectedQuotation] = useState<SavedQuotation | null>(null);
   const [quotationEditorOpen, setQuotationEditorOpen] = useState(false);
 
@@ -99,7 +120,10 @@ export function Dashboard() {
 
   useEffect(() => {
     const refreshQuotations = () => {
-      setRecentQuotations(getRecentQuotations(5));
+      const stored = getStoredQuotations();
+      setRecentQuotations(stored.slice(0, 10));
+      setStoredQuotationsCount(stored.length);
+      setRecordedPaymentsCount(stored.filter((q) => q.paymentRecorded === true).length);
     };
     refreshQuotations();
     window.addEventListener(QUOTATIONS_UPDATED_EVENT, refreshQuotations);
@@ -241,6 +265,8 @@ export function Dashboard() {
     {
       title: "LEADS & CRM",
       items: [
+        { id: "lead-board" as const, label: "Lead Board", icon: Kanban, count: storedQuotationsCount > 0 ? storedQuotationsCount : undefined },
+        { id: "payments" as const, label: "Payment Details", icon: CreditCard, count: recordedPaymentsCount > 0 ? recordedPaymentsCount : undefined },
         { id: "inquiries" as const, label: "Inquiries CRM", icon: ClipboardList, badge: activeInquiryCount > 0 ? activeInquiryCount : undefined },
       ]
     },
@@ -340,10 +366,19 @@ export function Dashboard() {
 
                 {/* Primary Action Buttons */}
                 <div className="shrink-0 self-start lg:self-center flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveView("last-quotations")}
+                    className="h-10 px-3.5 rounded-xl border border-slate-200/90 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 text-slate-800 dark:text-slate-200 text-xs font-bold gap-2 shadow-xs hover:bg-white dark:hover:bg-slate-800 transition-all flex items-center cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4 text-blue-600" />
+                    <span>Last 10 Quotations</span>
+                  </button>
+
                   <ItineraryMaker
                     trigger={
                       <button className="h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold gap-2 shadow-md shadow-blue-500/25 transition-all flex items-center cursor-pointer">
-                        <FileText className="w-4 h-4" />
+                        <Plus className="w-4 h-4" />
                         <span>Create Quotation</span>
                       </button>
                     }
@@ -747,6 +782,39 @@ export function Dashboard() {
       case "inquiries":
         return <InquiryDashboard />;
 
+      case "lead-board":
+        return (
+          <LeadBoard
+            onOpenQuotation={(q) => {
+              setSelectedQuotation(q);
+              setQuotationEditorOpen(true);
+            }}
+            onGoToPayments={() => setActiveView("payments")}
+          />
+        );
+
+      case "payments":
+        return (
+          <PaymentDetails
+            onGoToLeadBoard={() => setActiveView("lead-board")}
+            onOpenQuotation={(q) => {
+              setSelectedQuotation(q);
+              setQuotationEditorOpen(true);
+            }}
+          />
+        );
+
+      case "last-quotations":
+        return (
+          <RecentQuotationsPage
+            onOpenQuotation={(q) => {
+              setSelectedQuotation(q);
+              setQuotationEditorOpen(true);
+            }}
+            onGoToLeadBoard={() => setActiveView("lead-board")}
+          />
+        );
+
       case "admin":
         return <AdminUsers />;
 
@@ -930,66 +998,33 @@ export function Dashboard() {
 
         {/* Categorized Navigation */}
         <nav className="flex-1 px-3 py-3 space-y-4 overflow-y-auto">
-          {/* WORKSPACE: Last 5 Quotations (replaces Overview) */}
+          {/* WORKSPACE: Last 10 Quotations (Dedicated Page, Not inside sidebar list) */}
           <div className="space-y-1">
-            <div className="px-3 flex items-center justify-between gap-2">
-              <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                WORKSPACE
-              </span>
-              <span className="text-[10px] font-semibold text-blue-400/90">
-                Last 5 Quotations
-              </span>
-            </div>
-            <div className="space-y-1 pt-1">
-              {recentQuotations.length === 0 ? (
-                <div className="px-3 py-2.5 rounded-xl border border-dashed border-slate-700/70 bg-slate-900/40 text-[11px] text-slate-400 leading-relaxed">
-                  No quotations yet. Create or download a quotation to see it here.
+            <span className="px-3 text-[10px] font-bold text-slate-400 tracking-wider uppercase">
+              WORKSPACE
+            </span>
+            <div className="space-y-0.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveView("last-quotations");
+                  setSidebarOpen(false);
+                }}
+                className={cn(
+                  "w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer",
+                  activeView === "last-quotations"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-slate-300 hover:bg-white/10 hover:text-white"
+                )}
+              >
+                <div className="flex items-center gap-2.5">
+                  <FileText className="w-4 h-4 text-blue-400" />
+                  <span>Last 10 Quotations</span>
                 </div>
-              ) : (
-                recentQuotations.map((q) => {
-                  const isEditingThis = quotationEditorOpen && selectedQuotation?.id === q.id;
-                  return (
-                    <button
-                      key={q.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedQuotation(q);
-                        setQuotationEditorOpen(true);
-                        setSidebarOpen(false);
-                      }}
-                      className={cn(
-                        "w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-left transition-all cursor-pointer group",
-                        isEditingThis
-                          ? "bg-white/15 text-white"
-                          : "text-slate-300 hover:bg-white/10 hover:text-white"
-                      )}
-                      title={`${q.clientName || "Client"} — ${q.tripTitle || q.destination || q.quotationRef}`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <FileText className="w-4 h-4 shrink-0 text-blue-400/80 group-hover:text-blue-300 transition-colors" />
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-slate-200 group-hover:text-white truncate leading-tight">
-                            {q.clientName || q.tripTitle || "Untitled Quotation"}
-                          </p>
-                          <p className="text-[10px] text-slate-400 truncate mt-0.5 leading-tight">
-                            {q.clientName && q.tripTitle
-                              ? q.tripTitle
-                              : q.destination || q.quotationRef}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="shrink-0 flex items-center gap-1">
-                        {q.finalQuotationTotal > 0 && (
-                          <span className="text-[10px] font-semibold text-emerald-400 tabular-nums">
-                            ₹{q.finalQuotationTotal.toLocaleString("en-IN")}
-                          </span>
-                        )}
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 group-hover:translate-x-0.5 transition-all" />
-                      </div>
-                    </button>
-                  );
-                })
-              )}
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 font-bold">
+                  {recentQuotations.length}
+                </span>
+              </button>
             </div>
           </div>
 

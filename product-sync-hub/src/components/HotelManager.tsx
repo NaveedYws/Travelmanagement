@@ -17,6 +17,8 @@ import {
   DollarSign,
   Star,
   ExternalLink,
+  Database,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +29,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import {
   HotelItem,
   getStoredHotels,
+  fetchHotelsFromDb,
+  syncHotelsToDatabase,
   saveHotel,
   deleteHotel,
   resetHotelsToDefaults,
@@ -75,6 +79,7 @@ export function HotelManager({
 
   const [hotels, setHotels] = useState<HotelItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // New/Edit Hotel Dialog State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -100,12 +105,44 @@ export function HotelManager({
   useEffect(() => {
     loadData();
 
+    // Fetch and sync from database
+    setIsSyncing(true);
+    fetchHotelsFromDb()
+      .then((items) => {
+        if (items && items.length > 0) {
+          setHotels(items);
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not load hotels from database:", err);
+      })
+      .finally(() => {
+        setIsSyncing(false);
+      });
+
     const handleUpdate = () => {
       setHotels(getStoredHotels());
     };
     window.addEventListener("hotel_library_updated", handleUpdate);
     return () => window.removeEventListener("hotel_library_updated", handleUpdate);
   }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await syncHotelsToDatabase();
+      if (res.success) {
+        toast.success(`Successfully saved ${res.count} hotels to database!`);
+        loadData();
+      } else {
+        toast.error(res.error || "Could not sync to database.");
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Database sync failed");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const filteredHotels = hotels.filter((h) => {
     const q = searchQuery.toLowerCase().trim();
@@ -249,6 +286,19 @@ export function HotelManager({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="text-xs h-9 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/50"
+            title="Sync all hotels to the MySQL database"
+          >
+            <Database className={`w-3.5 h-3.5 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Syncing DB..." : "Save to DB"}
+          </Button>
+
           <Button
             variant="outline"
             size="sm"

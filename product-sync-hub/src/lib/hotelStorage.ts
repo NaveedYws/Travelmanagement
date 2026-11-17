@@ -1,3 +1,5 @@
+import { api } from "./api";
+
 export interface HotelItem {
   id: string;
   name: string;
@@ -133,12 +135,149 @@ export function getStoredHotels(): HotelItem[] {
   }
 }
 
-function persistHotels(hotels: HotelItem[]) {
+export function persistHotels(hotels: HotelItem[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(hotels));
     window.dispatchEvent(new CustomEvent("hotel_library_updated", { detail: hotels }));
   } catch (err) {
     console.error("Failed to persist hotels", err);
+  }
+}
+
+/**
+ * Background async save to database API
+ */
+async function apiSaveHotel(hotel: HotelItem): Promise<HotelItem | null> {
+  const token = localStorage.getItem("token");
+  if (!token) return null;
+
+  try {
+    const isNumericId = hotel.id && /^\d+$/.test(hotel.id);
+    if (isNumericId) {
+      const res = await api.put<{ status: string; id?: string; hotel?: HotelItem }>("/api/hotels/index.php", hotel);
+      return res?.hotel || hotel;
+    } else {
+      const res = await api.post<{ status: string; id?: string; hotel?: HotelItem }>("/api/hotels/index.php", hotel);
+      if (res?.id && res.id !== hotel.id) {
+        // Update local item with database numeric ID
+        const current = getStoredHotels();
+        const idx = current.findIndex((h) => h.id === hotel.id);
+        if (idx !== -1) {
+          current[idx] = { ...current[idx], id: res.id };
+          persistHotels(current);
+        }
+      }
+      return res?.hotel || { ...hotel, id: res?.id || hotel.id };
+    }
+  } catch (err) {
+    console.warn("Database sync for hotel failed (cached locally):", err);
+    return null;
+  }
+}
+
+/**
+ * Background async delete from database API
+ */
+async function apiDeleteHotel(id: string): Promise<boolean> {
+  const token = localStorage.getItem("token");
+  if (!token) return false;
+
+  try {
+    if (/^\d+$/.test(id)) {
+      await api.delete(`/api/hotels/index.php?id=${encodeURIComponent(id)}`);
+    }
+    return true;
+  } catch (err) {
+    console.warn("Database delete for hotel failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Fetches all hotels from the database.
+ * If database is empty, auto-syncs local/default hotels into the database.
+ */
+export async function fetchHotelsFromDb(): Promise<HotelItem[]> {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    return getStoredHotels();
+  }
+
+  try {
+    const res = await api.get<{ hotels: HotelItem[] }>("/api/hotels/index.php");
+    if (res && Array.isArray(res.hotels)) {
+      if (res.hotels.length > 0) {
+        persistHotels(res.hotels);
+        return res.hotels;
+      } else {
+        // Database is empty for this user: auto-seed from local library into database
+        const local = getStoredHotels();
+        if (local.length > 0) {
+          await syncHotelsToDatabase(local);
+        }
+        return local;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch hotels from database, falling back to local cache:", err);
+  }
+
+  return getStoredHotels();
+}
+
+/**
+ * Syncs an array of hotels to the database in batch.
+ */
+export async function syncHotelsToDatabase(items?: HotelItem[]): Promise<{ success: boolean; count: number; error?: string }> {
+  const token = localStorage.getItem("token");
+  if (!token) return { success: false, count: 0, error: "Please log in to sync hotels with database" };
+
+  const toSync = items || getStoredHotels();
+  if (toSync.length === 0) return { success: true, count: 0 };
+
+  try {
+    const res = await api.post<{ status: string; hotels?: HotelItem[] }>("/api/hotels/index.php", {
+      hotels: toSync.map((h) => ({
+        name: h.name,
+        city: h.city,
+        rooms: h.rooms || ["Deluxe Room"],
+        imageUrl: h.imageUrl || "",
+        starRating: h.starRating || "3 Star",
+        defaultMealPlan: h.defaultMealPlan || "CP (Breakfast Included)",
+        defaultRatePerNight: h.defaultRatePerNight || 0,
+        amenities: h.amenities || "",
+        description: h.description || "",
+      })),
+    });
+
+    if (res.hotels && res.hotels.length > 0) {
+      persistHotels(res.hotels);
+      return { success: true, count: res.hotels.length };
+    }
+    return { success: true, count: toSync.length };
+  } catch (batchErr: any) {
+    // Fallback: If server returns error on batch, try saving items one-by-one
+    try {
+      let savedCount = 0;
+      for (const h of toSync) {
+        await api.post("/api/hotels/index.php", {
+          name: h.name,
+          city: h.city,
+          rooms: h.rooms || ["Deluxe Room"],
+          imageUrl: h.imageUrl || "",
+          starRating: h.starRating || "3 Star",
+          defaultMealPlan: h.defaultMealPlan || "CP (Breakfast Included)",
+          defaultRatePerNight: h.defaultRatePerNight || 0,
+          amenities: h.amenities || "",
+          description: h.description || "",
+        });
+        savedCount++;
+      }
+      return { success: true, count: savedCount };
+    } catch (fallbackErr: any) {
+      console.error("Failed to sync hotels to database:", fallbackErr);
+      return { success: false, count: 0, error: fallbackErr?.message || batchErr?.message || "Failed to sync hotels to database" };
+    }
   }
 }
 
@@ -189,12 +328,15 @@ export function saveHotel(item: {
       };
       current[idx] = updated;
       persistHotels(current);
+
+      // Save to database asynchronously
+      apiSaveHotel(updated);
       return updated;
     }
   }
 
-  // Create new
-  const newId = `hotel-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  // Create new hotel
+  const newId = item.id || `hotel-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const created: HotelItem = {
     id: newId,
     name: item.name.trim(),
@@ -212,6 +354,9 @@ export function saveHotel(item: {
 
   const next = [created, ...current];
   persistHotels(next);
+
+  // Save to database asynchronously
+  apiSaveHotel(created);
   return created;
 }
 
@@ -219,9 +364,13 @@ export function deleteHotel(id: string): void {
   const current = getStoredHotels();
   const next = current.filter((h) => h.id !== id);
   persistHotels(next);
+
+  // Delete from database asynchronously
+  apiDeleteHotel(id);
 }
 
 export function resetHotelsToDefaults(): HotelItem[] {
   persistHotels(DEFAULT_HOTELS);
+  syncHotelsToDatabase(DEFAULT_HOTELS);
   return DEFAULT_HOTELS;
 }

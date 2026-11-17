@@ -158,12 +158,23 @@ export interface DetailedItinerary {
   created_at?: string;
 }
 
+export type QuotationLeadStatus =
+  | "In Progress"
+  | "Hold"
+  | "Converted"
+  | "Active"
+  | "Completed"
+  | "Canceled"
+  | "Cancel";
+
 export interface SavedQuotation {
   id: string;
   quotationRef: string;
   quotationDate: string;
   validUntilDate: string;
-  rateDisplayMode: "subtotal" | "full";
+  amountMode?: "calculated" | "manual";
+  manualAmount?: string;
+  rateDisplayMode?: "subtotal" | "full";
   clientName: string;
   clientEmail: string;
   clientPhone: string;
@@ -196,6 +207,13 @@ export interface SavedQuotation {
   tcsRate: number;
   discountAmount: number;
   finalQuotationTotal: number;
+  status?: QuotationLeadStatus | string;
+  paymentRecorded?: boolean;
+  paymentStatus?: "Paid" | "Partial" | "Pending" | string;
+  paymentMethod?: string;
+  paymentDate?: string;
+  paidAmount?: number;
+  transactionRef?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -245,6 +263,9 @@ export interface Inquiry {
   source?: "meta_ads" | "google_ads" | "website" | "csv_import" | string | null;
   campaign_name?: string | null;
   email?: string | null;
+  destination?: string | null;
+  arrival_date?: string | null;
+  pax?: string | null;
   products?: {
     name: string;
     category: string | null;

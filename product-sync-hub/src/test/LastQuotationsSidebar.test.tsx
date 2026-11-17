@@ -150,10 +150,10 @@ describe("quotationStorage and Sidebar Last 5 Quotations", () => {
     }
   });
 
-  it("replaces Overview in sidebar with Last 5 Quotations and reopens clicked quotation in Quotation Studio", async () => {
+  it("navigates to Last 10 Quotations page, shows table with name, date and edit option, and reopens quotation in Quotation Studio", async () => {
     vi.useFakeTimers();
     try {
-      for (let i = 1; i <= 6; i++) {
+      for (let i = 1; i <= 11; i++) {
         vi.setSystemTime(new Date(2026, 10, 11, 12, i, 0));
         saveQuotation(
           makeQuotationInput({
@@ -161,6 +161,7 @@ describe("quotationStorage and Sidebar Last 5 Quotations", () => {
             clientName: `Guest ${i}`,
             tripTitle: `Destination Tour ${i}`,
             destination: `City ${i}`,
+            quotationDate: `1${i} Nov 2026`,
             finalQuotationTotal: i * 15000,
           })
         );
@@ -172,23 +173,34 @@ describe("quotationStorage and Sidebar Last 5 Quotations", () => {
     render(<Dashboard />);
 
     const nav = screen.getByRole("navigation");
-    expect(within(nav).queryByRole("button", { name: /^Overview$/i })).not.toBeInTheDocument();
-    expect(within(nav).getByText("Last 5 Quotations")).toBeInTheDocument();
+    expect(within(nav).getByText("Last 10 Quotations")).toBeInTheDocument();
 
-    // Only the last 5 (Guest 6 down to Guest 2) appear in the sidebar; Guest 1 is excluded
-    expect(within(nav).getByText("Guest 6")).toBeInTheDocument();
-    expect(within(nav).getByText("Guest 2")).toBeInTheDocument();
-    expect(within(nav).queryByText("Guest 1")).not.toBeInTheDocument();
+    // Click "Last 10 Quotations" in the sidebar to open the dedicated page
+    fireEvent.click(within(nav).getByText("Last 10 Quotations"));
 
-    // Clicking Guest 4 opens Quotation Studio populated with Guest 4's data
-    fireEvent.click(within(nav).getByText("Guest 4"));
+    // Page title and table are rendered (not cramped in sidebar)
+    expect(screen.getByRole("heading", { name: "Last 10 Quotations" })).toBeInTheDocument();
+    expect(screen.getByText("Name (Client / Lead)")).toBeInTheDocument();
+    expect(screen.getByText("Date")).toBeInTheDocument();
+    expect(screen.getByText("Edit Option")).toBeInTheDocument();
+
+    // Shows the last 10 (Guest 11 down to Guest 2), while Guest 1 is excluded from top 10
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Guest 11")).toBeInTheDocument();
+    expect(within(table).getByText("Guest 2")).toBeInTheDocument();
+    expect(within(table).queryByText("Guest 1")).not.toBeInTheDocument();
+
+    // Clicking Guest 4's Edit option opens Quotation Studio populated with Guest 4's data
+    const guest4Row = within(table).getByText("Guest 4").closest("tr")!;
+    const editBtn = within(guest4Row).getByRole("button", { name: /Edit/i });
+    fireEvent.click(editBtn);
 
     expect(screen.getByRole("heading", { name: /Create Quotation/i })).toBeInTheDocument();
     expect((screen.getByPlaceholderText("e.g. John Doe") as HTMLInputElement).value).toBe("Guest 4");
     expect(screen.getByDisplayValue("Destination Tour 4")).toBeInTheDocument();
     expect(screen.getByDisplayValue("City 4")).toBeInTheDocument();
 
-    // Update Client Name and Save Draft -> moves to top of Last 5 Quotations in sidebar
+    // Update Client Name and Save Draft -> updates the table in real time
     const titleInput = screen.getByPlaceholderText("e.g. 5 Days Kashmir Paradise Tour");
     fireEvent.change(titleInput, { target: { value: "Updated Tour 4" } });
 
@@ -196,7 +208,140 @@ describe("quotationStorage and Sidebar Last 5 Quotations", () => {
     fireEvent.click(saveButtons[0]);
 
     await waitFor(() => {
-      expect(within(nav).getByText("Updated Tour 4")).toBeInTheDocument();
+      expect(screen.getAllByText("Updated Tour 4").length).toBeGreaterThanOrEqual(1);
+    });
+  }, 20000);
+
+  it("toggles between Cal Amount and Edit Amount modes, persists edited total across reopen, and restores calculated total", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(2026, 10, 11, 13, 1, 0));
+      saveQuotation(
+        makeQuotationInput({
+          quotationRef: "QT-MODE-1",
+          clientName: "Custom Rate Guest",
+          tripTitle: "Custom Price Tour",
+          destination: "Manali",
+          gstRate: 5,
+          tcsRate: 0,
+          discountAmount: 0,
+          finalQuotationTotal: 0,
+        })
+      );
+
+      vi.setSystemTime(new Date(2026, 10, 11, 13, 2, 0));
+      saveQuotation(
+        makeQuotationInput({
+          quotationRef: "QT-MODE-2",
+          clientName: "Other Guest",
+          tripTitle: "Standard Tour",
+          destination: "Shimla",
+          gstRate: 0,
+          tcsRate: 0,
+          discountAmount: 0,
+          finalQuotationTotal: 0,
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    render(<Dashboard />);
+    const nav = screen.getByRole("navigation");
+
+    // Open Last 10 Quotations page
+    fireEvent.click(within(nav).getByText("Last 10 Quotations"));
+
+    const table = screen.getByRole("table");
+    const customRow = within(table).getByText("Custom Rate Guest").closest("tr")!;
+    fireEvent.click(within(customRow).getByRole("button", { name: /Edit/i }));
+    expect(screen.getByRole("heading", { name: /Create Quotation/i })).toBeInTheDocument();
+
+    // Starts with Subtotal Only Mode and Cal Amount Mode (both switches visible)
+    const rateSwitch = screen.getByRole("switch", { name: /Toggle subtotal or full customized rate/i });
+    expect(rateSwitch).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Subtotal Only Mode")).toBeInTheDocument();
+    expect(screen.getByText("Consolidated Package Rate")).toBeInTheDocument();
+
+    const amountSwitch = screen.getByRole("switch", { name: /Toggle Cal Amount or Edit Amount/i });
+    expect(amountSwitch).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Cal Amount Mode")).toBeInTheDocument();
+    expect(screen.getByText("Auto-calculated from services")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Edit Total Quotation Price")).not.toBeInTheDocument();
+
+    // Switch rate display to Full Rate AND amount mode to Edit Amount
+    fireEvent.click(rateSwitch);
+    expect(rateSwitch).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Full Itemized Mode")).toBeInTheDocument();
+    expect(screen.getByText("Hotel Accommodation")).toBeInTheDocument();
+
+    fireEvent.click(amountSwitch);
+    expect(amountSwitch).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Edit Amount Mode")).toBeInTheDocument();
+    expect(screen.getByText("Enter custom quotation total")).toBeInTheDocument();
+
+    const editAmountInput = screen.getByLabelText("Edit Total Quotation Price") as HTMLInputElement;
+    fireEvent.change(editAmountInput, { target: { value: "48000" } });
+    expect(editAmountInput.value).toBe("48000");
+    expect(screen.getAllByText(/₹48,000/).length).toBeGreaterThan(0);
+
+    // Save Draft -> persists both rateDisplayMode and amountMode/manualAmount in localStorage
+    const saveButtons = screen.getAllByRole("button", { name: /Save Draft/i });
+    fireEvent.click(saveButtons[0]);
+
+    await waitFor(() => {
+      const saved = getRecentQuotations(10).find((q) => q.quotationRef === "QT-MODE-1");
+      expect(saved?.rateDisplayMode).toBe("full");
+      expect(saved?.amountMode).toBe("manual");
+      expect(saved?.manualAmount).toBe("48000");
+      expect(saved?.finalQuotationTotal).toBe(48000);
+    });
+
+    // Switch to another quotation in the table, then reopen Custom Rate Guest
+    const otherRow = within(table).getByText("Other Guest").closest("tr")!;
+    fireEvent.click(within(otherRow).getByRole("button", { name: /Edit/i }));
+    expect(screen.getByDisplayValue("Standard Tour")).toBeInTheDocument();
+    expect(screen.getByText("Subtotal Only Mode")).toBeInTheDocument();
+    expect(screen.getByText("Cal Amount Mode")).toBeInTheDocument();
+
+    const customRow2 = within(table).getByText("Custom Rate Guest").closest("tr")!;
+    fireEvent.click(within(customRow2).getByRole("button", { name: /Edit/i }));
+    expect(screen.getByDisplayValue("Custom Price Tour")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Toggle subtotal or full customized rate/i })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+    expect(screen.getByText("Full Itemized Mode")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Toggle Cal Amount or Edit Amount/i })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+    expect(screen.getByText("Edit Amount Mode")).toBeInTheDocument();
+    expect((screen.getByLabelText("Edit Total Quotation Price") as HTMLInputElement).value).toBe("48000");
+    expect(screen.getAllByText(/₹48,000/).length).toBeGreaterThan(0);
+
+    // Switch back to Subtotal Only and Cal Amount -> restores calculated view in Quotation Studio
+    fireEvent.click(screen.getByRole("switch", { name: /Toggle subtotal or full customized rate/i }));
+    expect(screen.getByText("Subtotal Only Mode")).toBeInTheDocument();
+    expect(screen.getByText("Consolidated Package Rate")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: /Toggle Cal Amount or Edit Amount/i }));
+    expect(screen.getByRole("switch", { name: /Toggle Cal Amount or Edit Amount/i })).toHaveAttribute(
+      "aria-checked",
+      "false"
+    );
+    expect(screen.getByText("Cal Amount Mode")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Edit Total Quotation Price")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/₹48,000/).length).toBeGreaterThan(0);
+
+    // Save Draft in Subtotal + Cal Amount modes -> persists both and updates table total
+    fireEvent.click(screen.getAllByRole("button", { name: /Save Draft/i })[0]);
+
+    await waitFor(() => {
+      const saved = getRecentQuotations(10).find((q) => q.quotationRef === "QT-MODE-1");
+      expect(saved?.rateDisplayMode).toBe("subtotal");
+      expect(saved?.amountMode).toBe("calculated");
+      expect(saved?.finalQuotationTotal).toBe(0);
     });
   }, 20000);
 });

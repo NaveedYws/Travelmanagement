@@ -27,10 +27,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
   }
 
-  const data = await response.json();
+  let data: any = null;
+  const rawText = await response.text();
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    if (!response.ok) {
+      throw new Error(`API endpoint ${cleanPath} returned HTTP ${response.status} (${response.statusText || 'Error'}). Ensure backend files are uploaded.`);
+    }
+    throw new Error(`Server returned unexpected response (not JSON): ${rawText.slice(0, 80)}`);
+  }
 
   if (!response.ok) {
-    throw new Error(data.error || 'Something went wrong');
+    throw new Error(data?.error || `Request failed with status ${response.status}`);
   }
 
   return data as T;
