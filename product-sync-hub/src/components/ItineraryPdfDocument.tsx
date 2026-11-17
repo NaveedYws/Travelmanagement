@@ -605,12 +605,6 @@ export function planContentPages({
       }
     }
 
-    // If this page contains Accommodation or Transport, and a multi-day itinerary follows (unplacedDays.length > 1),
-    // finish this page so the Day-wise Itinerary starts cleanly together at the top of the next page!
-    if ((page.hotels || page.transports) && unplacedDays.length > 1) {
-      pages.push(page);
-      continue;
-    }
 
     // 10% REMAINING SPACE RULE: If less than ~10% space remains, move to the next page
     if (spaceLeft < MIN_SPACE_THRESHOLD) {

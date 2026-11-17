@@ -220,6 +220,48 @@ describe("ItineraryPdfDocument uniform text sizes", () => {
     expect(pages[2].days?.list.map((d) => d.day)).toEqual([6]);
   });
 
+  it("starts day-wise itinerary on the same page following transport instead of dropping the rest of the page", () => {
+    // 4 hotels fill Page 1, so transports are placed on Page 2
+    const fourHotels = Array.from({ length: 4 }, (_, i) => ({
+      hotelName: `Hotel ${i + 1}`,
+      location: `Location ${i + 1}`,
+      checkIn: "2026-05-10",
+      checkOut: "2026-05-12",
+      roomCategory: "Deluxe Room",
+      mealPlan: "MAP",
+      nights: 2,
+      rooms: 1,
+    }));
+
+    const pages = planContentPages({
+      activeDays: sampleData.days,
+      activeHotels: fourHotels,
+      activeTransports: [
+        {
+          vehicleType: "Maruti Ertiga",
+          pickupTime: "10:00 AM",
+          route: "katra to srinagar to sonmarg to gulmarg to pahalgam to jammu departure",
+          inclusions: ["Driver Allowance", "Toll & State Taxes", "Fuel Charges", "Parking Fees"],
+          vehiclesCount: 1,
+        },
+      ],
+      activeActivities: [],
+      effectiveInclusions: [],
+      effectiveExclusions: [],
+      hasPaymentDetails: false,
+      clientNotes: "",
+    });
+
+    // Page 1 has hotels
+    expect(pages[0].hotels).toBeDefined();
+
+    // Page 2 has transports AND starts the Day Itinerary on the same page
+    expect(pages[1].transports).toBeDefined();
+    expect(pages[1].days).toBeDefined();
+    expect(pages[1].days?.list.length).toBeGreaterThanOrEqual(1);
+    expect(pages[1].days?.list[0].day).toBe(1);
+  });
+
   it("renders transport from/to dates and custom included services in PDF", () => {
     const { container } = render(
       <ItineraryPdfDocument
