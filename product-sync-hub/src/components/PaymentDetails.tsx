@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { SavedQuotation } from "@/lib/types";
 import {
   getStoredQuotations,
+  fetchQuotationsFromDb,
   updateQuotation,
   saveQuotation,
   QUOTATIONS_UPDATED_EVENT,
@@ -120,7 +121,11 @@ export function PaymentDetails({
   const [clientEmail, setClientEmail] = useState("");
   const [transactionRef, setTransactionRef] = useState("");
 
-  // Sync reactively with localStorage and quotation update events
+  // Sync reactively with Database, localStorage and quotation update events
+  useEffect(() => {
+    fetchQuotationsFromDb().catch(() => {});
+  }, []);
+
   useEffect(() => {
     const handleUpdate = () => {
       setQuotations(getStoredQuotations());

@@ -10,7 +10,6 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
-  RotateCcw,
   Sparkles,
   X,
   Check,
@@ -37,7 +36,6 @@ import {
   addDayToDestination,
   updateDayInDestination,
   deleteDayFromDestination,
-  resetDestinationsToDefaults,
 } from "@/lib/destinationStorage";
 import { toast } from "sonner";
 import { compressImageTo500KB } from "@/lib/imageCompression";
@@ -297,14 +295,6 @@ export function DestinationManager({
     }
   };
 
-  const handleResetDefaults = () => {
-    if (confirm("Reset destinations to official default templates (Kashmir, Ladakh, Himachal, Dubai, Bali, Kerala)?")) {
-      resetDestinationsToDefaults();
-      toast.success("Destinations reset to defaults");
-      loadData();
-    }
-  };
-
   const renderMainContent = () => (
     <div className="space-y-6">
       {/* Top Header & Search Bar */}
@@ -340,18 +330,6 @@ export function DestinationManager({
           >
             <Database className={`w-3.5 h-3.5 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
             {isSyncing ? "Syncing DB..." : "Save to DB"}
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleResetDefaults}
-            className="text-xs h-9 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50"
-            title="Reload official template destinations"
-          >
-            <RotateCcw className="w-3.5 h-3.5 mr-1" />
-            Defaults
           </Button>
 
           <Button

@@ -150,7 +150,7 @@ describe("quotationStorage and Sidebar Last 5 Quotations", () => {
     }
   });
 
-  it("navigates to Last 10 Quotations page, shows table with name, date and edit option, and reopens quotation in Quotation Studio", async () => {
+  it("navigates to Last 5 Quotations page, shows table with name, date and edit option, and reopens quotation in Quotation Studio", async () => {
     vi.useFakeTimers();
     try {
       for (let i = 1; i <= 11; i++) {
@@ -173,42 +173,42 @@ describe("quotationStorage and Sidebar Last 5 Quotations", () => {
     render(<Dashboard />);
 
     const nav = screen.getByRole("navigation");
-    expect(within(nav).getByText("Last 10 Quotations")).toBeInTheDocument();
+    expect(within(nav).getByText("Last 5 Quotations")).toBeInTheDocument();
 
-    // Click "Last 10 Quotations" in the sidebar to open the dedicated page
-    fireEvent.click(within(nav).getByText("Last 10 Quotations"));
+    // Click "Last 5 Quotations" in the sidebar to open the dedicated page
+    fireEvent.click(within(nav).getByText("Last 5 Quotations"));
 
     // Page title and table are rendered (not cramped in sidebar)
-    expect(screen.getByRole("heading", { name: "Last 10 Quotations" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Last 5 Quotations" })).toBeInTheDocument();
     expect(screen.getByText("Name (Client / Lead)")).toBeInTheDocument();
     expect(screen.getByText("Date")).toBeInTheDocument();
     expect(screen.getByText("Edit Option")).toBeInTheDocument();
 
-    // Shows the last 10 (Guest 11 down to Guest 2), while Guest 1 is excluded from top 10
+    // Shows only the last 5 (Guest 11 down to Guest 7), while Guest 6 down to Guest 1 are excluded from top 5
     const table = screen.getByRole("table");
     expect(within(table).getByText("Guest 11")).toBeInTheDocument();
-    expect(within(table).getByText("Guest 2")).toBeInTheDocument();
+    expect(within(table).getByText("Guest 7")).toBeInTheDocument();
+    expect(within(table).queryByText("Guest 6")).not.toBeInTheDocument();
     expect(within(table).queryByText("Guest 1")).not.toBeInTheDocument();
 
-    // Clicking Guest 4's Edit option opens Quotation Studio populated with Guest 4's data
-    const guest4Row = within(table).getByText("Guest 4").closest("tr")!;
-    const editBtn = within(guest4Row).getByRole("button", { name: /Edit/i });
+    // Clicking Guest 9's Edit option opens Quotation Studio populated with Guest 9's data
+    const guest9Row = within(table).getByText("Guest 9").closest("tr")!;
+    const editBtn = within(guest9Row).getByRole("button", { name: /Edit/i });
     fireEvent.click(editBtn);
 
     expect(screen.getByRole("heading", { name: /Create Quotation/i })).toBeInTheDocument();
-    expect((screen.getByPlaceholderText("e.g. John Doe") as HTMLInputElement).value).toBe("Guest 4");
-    expect(screen.getByDisplayValue("Destination Tour 4")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("City 4")).toBeInTheDocument();
+    expect((screen.getByPlaceholderText("e.g. John Doe") as HTMLInputElement).value).toBe("Guest 9");
+    expect(screen.getByDisplayValue("Destination Tour 9")).toBeInTheDocument();
 
     // Update Client Name and Save Draft -> updates the table in real time
     const titleInput = screen.getByPlaceholderText("e.g. 5 Days Kashmir Paradise Tour");
-    fireEvent.change(titleInput, { target: { value: "Updated Tour 4" } });
+    fireEvent.change(titleInput, { target: { value: "Updated Tour 9" } });
 
     const saveButtons = screen.getAllByRole("button", { name: /Save Draft/i });
     fireEvent.click(saveButtons[0]);
 
     await waitFor(() => {
-      expect(screen.getAllByText("Updated Tour 4").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Updated Tour 9").length).toBeGreaterThanOrEqual(1);
     });
   }, 20000);
 
@@ -249,8 +249,8 @@ describe("quotationStorage and Sidebar Last 5 Quotations", () => {
     render(<Dashboard />);
     const nav = screen.getByRole("navigation");
 
-    // Open Last 10 Quotations page
-    fireEvent.click(within(nav).getByText("Last 10 Quotations"));
+    // Open Last 5 Quotations page
+    fireEvent.click(within(nav).getByText("Last 5 Quotations"));
 
     const table = screen.getByRole("table");
     const customRow = within(table).getByText("Custom Rate Guest").closest("tr")!;

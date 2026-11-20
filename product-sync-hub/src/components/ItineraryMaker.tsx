@@ -61,8 +61,14 @@ import {
   ItineraryService,
   SavedQuotation,
   QuotationLeadStatus,
+  Product,
 } from "@/lib/types";
-import { saveQuotation, SaveQuotationInput } from "@/lib/quotationStorage";
+import {
+  saveQuotation,
+  SaveQuotationInput,
+  getRecentQuotations,
+  QUOTATIONS_UPDATED_EVENT,
+} from "@/lib/quotationStorage";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
@@ -117,6 +123,33 @@ const PRESET_TRANSPORT_INCLUSIONS = [
   "Airport / Station Transfers",
   "All Sightseeing Transfers",
   "24x7 Travel Assistance",
+];
+
+export const POPULAR_CAB_NAMES = [
+  "Sedan (Dzire / Etios)",
+  "Innova Crysta",
+  "Maruti Ertiga",
+  "Toyota Innova",
+  "Tempo Traveller (12 / 17 Seater)",
+  "Force Urbania",
+  "SUV (Scorpio / Bolero)",
+];
+
+const HOTEL_MEAL_PLAN_OPTIONS = [
+  "CP (Breakfast Included)",
+  "MAP (Breakfast & Dinner)",
+  "AP (All Meals Included)",
+  "EP (Room Only)",
+  "MAPAI (Breakfast + Dinner + Taxes)",
+  "CPAI (Breakfast + Taxes)",
+];
+
+const HOTEL_MEAL_PLAN_QUICK_PICKS = [
+  { label: "CP", full: "CP (Breakfast Included)", code: "CP" },
+  { label: "MAP", full: "MAP (Breakfast & Dinner)", code: "MAP" },
+  { label: "AP", full: "AP (All Meals Included)", code: "AP" },
+  { label: "EP", full: "EP (Room Only)", code: "EP" },
+  { label: "MAPAI", full: "MAPAI (Breakfast + Dinner + Taxes)", code: "MAPAI" },
 ];
 
 const createQuotationRef = () => {
@@ -202,7 +235,10 @@ export function ItineraryMaker({
   const [isEditingPax, setIsEditingPax] = useState(false);
 
   // 2. Package Overview (Blank clean start)
-  const [packageType, setPackageType] = useState<"Full Package" | "Customized">("Full Package");
+  const [packageType, setPackageType] = useState<"Customized" | "Recent Package" | string>("Customized");
+  const [selectedRecentPackageId, setSelectedRecentPackageId] = useState<string>("");
+  const [catalogPackages, setCatalogPackages] = useState<Product[]>([]);
+  const [storedQuotationsList, setStoredQuotationsList] = useState<SavedQuotation[]>(() => getRecentQuotations(5));
   const [tripTitle, setTripTitle] = useState("");
   const [destination, setDestination] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -253,6 +289,69 @@ export function ItineraryMaker({
     });
     return Array.from(set);
   }, [destLibrary]);
+
+  // Sync recent quotations and catalog packages for Recent Package dropdown
+  useEffect(() => {
+    const handleUpdate = () => {
+      setStoredQuotationsList(getRecentQuotations(5));
+    };
+    window.addEventListener(QUOTATIONS_UPDATED_EVENT, handleUpdate);
+    return () => window.removeEventListener(QUOTATIONS_UPDATED_EVENT, handleUpdate);
+  }, []);
+
+  useEffect(() => {
+    api?.get?.<{ products: Product[] }>("/api/products/index.php")
+      ?.then((res) => {
+        if (res && Array.isArray(res.products)) {
+          setCatalogPackages(res.products);
+        }
+      })
+      ?.catch(() => {});
+  }, []);
+
+  const recentPackages = useMemo(() => {
+    const list: Array<{
+      id: string;
+      title: string;
+      subtitle?: string;
+      daysCount?: number;
+      type: "quotation" | "catalog";
+      raw: SavedQuotation | Product;
+    }> = [];
+
+    for (const q of storedQuotationsList) {
+      if (q.tripTitle?.trim()) {
+        list.push({
+          id: `q_${q.id || q.quotationRef}`,
+          title: q.tripTitle,
+          subtitle: q.clientName ? `Client: ${q.clientName}` : undefined,
+          daysCount: q.days?.length,
+          type: "quotation",
+          raw: q,
+        });
+      }
+      if (list.length >= 10) break;
+    }
+
+    if (list.length < 10) {
+      for (const p of catalogPackages) {
+        const title = p.title || p.name;
+        if (title && !list.some((item) => item.title.toLowerCase() === title.toLowerCase())) {
+          list.push({
+            id: `p_${p.id}`,
+            title,
+            subtitle: p.duration ? `Duration: ${p.duration}` : undefined,
+            daysCount: p.itinerary?.length,
+            type: "catalog",
+            raw: p,
+          });
+        }
+        if (list.length >= 5) break;
+      }
+    }
+
+    return list.slice(0, 5);
+  }, [storedQuotationsList, catalogPackages]);
 
   // 4. Hotels (Pre-saved library + Blank clean start)
   const [savedHotels, setSavedHotels] = useState<HotelItem[]>([]);
@@ -312,6 +411,8 @@ export function ItineraryMaker({
     price: 0,
     inclusions: [...DEFAULT_TRANSPORT_INCLUSIONS],
   });
+  const [isCabDropdownOpen, setIsCabDropdownOpen] = useState(false);
+  const cabDropdownRef = useRef<HTMLDivElement>(null);
   const [transportInclusionsOpen, setTransportInclusionsOpen] = useState(false);
   const [newTransportInclusionInput, setNewTransportInclusionInput] = useState("");
   const [customTransportInclusions, setCustomTransportInclusions] = useState<string[]>([]);
@@ -357,6 +458,30 @@ export function ItineraryMaker({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [transportInclusionsOpen]);
+
+  // Close Cab Dropdown on outside click or Escape
+  useEffect(() => {
+    if (!isCabDropdownOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (
+        cabDropdownRef.current &&
+        !cabDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsCabDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsCabDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isCabDropdownOpen]);
 
   // 6. Sightseeing / Activities (Blank clean start)
   const [sightseeings, setSightseeings] = useState<ItinerarySightseeing[]>([]);
@@ -467,7 +592,8 @@ export function ItineraryMaker({
     setRoomsCount("1");
     setMealPlan("MAP (Breakfast & Dinner)");
     setIsEditingPax(false);
-    setPackageType("Full Package");
+    setPackageType("Customized");
+    setSelectedRecentPackageId("");
     setTripTitle("");
     setDestination("");
     setStartDate("");
@@ -532,7 +658,7 @@ export function ItineraryMaker({
     setRoomsCount(q.roomsCount || "1");
     setMealPlan(q.mealPlan || "MAP (Breakfast & Dinner)");
     setIsEditingPax(false);
-    setPackageType(q.packageType || "Full Package");
+    setPackageType(q.packageType || "Customized");
     setTripTitle(q.tripTitle || "");
     setDestination(q.destination || "");
     setStartDate(q.startDate || "");
@@ -570,6 +696,59 @@ export function ItineraryMaker({
     setShowPreview(false);
     setShowShareModal(false);
     setMobileMenuOpen(false);
+  };
+
+  const handleClearPackageForm = () => {
+    resetForm();
+    setPackageType("Recent Package");
+    setSelectedRecentPackageId("");
+    toast.info("Form cleared");
+  };
+
+  const handleSelectRecentPackage = (id: string) => {
+    setSelectedRecentPackageId(id);
+    if (!id) {
+      handleClearPackageForm();
+      return;
+    }
+
+    const item = recentPackages.find((pkg) => pkg.id === id);
+    if (!item) return;
+
+    if (item.type === "quotation") {
+      const q = item.raw as SavedQuotation;
+      loadQuotation(q);
+      setPackageType("Recent Package");
+      setSelectedRecentPackageId(id);
+      toast.success(`Loaded "${q.tripTitle || "Recent Package"}" into quotation`);
+    } else {
+      const p = item.raw as Product;
+      setTripTitle(p.title || p.name);
+      if (p.itinerary && p.itinerary.length > 0) {
+        const loadedDays: DetailedItineraryDay[] = p.itinerary.map((d, i) => ({
+          day: i + 1,
+          destination: (d as any).destination || "",
+          title: d.title || `Day ${i + 1}`,
+          activities: d.description || d.title || "",
+          description: d.description || "",
+          images: d.imageUrl ? [d.imageUrl] : [],
+          highlights: d.highlights,
+        }));
+        setDays(loadedDays);
+        setNewDayNumber(loadedDays.length + 1);
+      }
+      if (p.inclusions && p.inclusions.length > 0) {
+        setInclusions(p.inclusions);
+      }
+      if (p.exclusions && p.exclusions.length > 0) {
+        setExclusions(p.exclusions);
+      }
+      if (p.price) {
+        setAmountMode("manual");
+        setManualAmount(String(p.price));
+      }
+      toast.success(`Loaded "${p.title || p.name}" from catalog`);
+    }
   };
 
   useEffect(() => {
@@ -738,29 +917,35 @@ export function ItineraryMaker({
       return;
     }
 
+    const currentDayNum = editingDayIndex !== null ? newDayNumber : days.length + 1;
+
     if (editingDayIndex !== null) {
       const updated = [...days];
       updated[editingDayIndex] = {
         ...updated[editingDayIndex],
-        day: newDayNumber,
-        destination: newDayDestination,
-        title: newDayTitle,
-        activities: newDayHighlights || newDayTitle,
-        description: newDayDescription,
-        highlights: newDayHighlights ? newDayHighlights.split(/[,•;]+/).map((h) => h.trim()).filter(Boolean) : undefined,
-        images: newDayImageUrl ? [newDayImageUrl] : updated[editingDayIndex].images,
+        day: currentDayNum,
+        destination: newDayDestination.trim(),
+        title: newDayTitle.trim(),
+        activities: newDayDescription.trim() || newDayTitle.trim(),
+        description: newDayDescription.trim(),
+        highlights: newDayDescription
+          ? newDayDescription.split(/[\n,;•]+/).map((h) => h.trim().replace(/^[-*•]\s*/, "")).filter(Boolean)
+          : updated[editingDayIndex].highlights,
+        images: newDayImageUrl ? [newDayImageUrl] : updated[editingDayIndex].images || [],
       };
       setDays(updated);
       setEditingDayIndex(null);
-      toast.success(`Day ${newDayNumber} updated`);
+      toast.success(`Day ${currentDayNum} updated`);
     } else {
       const newDay: DetailedItineraryDay = {
-        day: days.length + 1,
-        destination: newDayDestination,
-        title: newDayTitle,
-        activities: newDayHighlights || newDayTitle,
-        description: newDayDescription,
-        highlights: newDayHighlights ? newDayHighlights.split(/[,•;]+/).map((h) => h.trim()).filter(Boolean) : undefined,
+        day: currentDayNum,
+        destination: newDayDestination.trim(),
+        title: newDayTitle.trim(),
+        activities: newDayDescription.trim() || newDayTitle.trim(),
+        description: newDayDescription.trim(),
+        highlights: newDayDescription
+          ? newDayDescription.split(/[\n,;•]+/).map((h) => h.trim().replace(/^[-*•]\s*/, "")).filter(Boolean)
+          : undefined,
         images: newDayImageUrl ? [newDayImageUrl] : [],
       };
       setDays([...days, newDay]);
@@ -803,9 +988,9 @@ export function ItineraryMaker({
     const d = days[idx];
     setEditingDayIndex(idx);
     setNewDayNumber(d.day);
-    setNewDayDestination(d.destination || destination || "");
-    setNewDayTitle(d.title);
-    setNewDayDescription(d.description);
+    setNewDayDestination(d.destination || "");
+    setNewDayTitle(d.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, ""));
+    setNewDayDescription(d.description || d.activities || "");
     setNewDayHighlights(d.highlights?.join(", ") || (d.activities && d.activities !== d.title ? d.activities : ""));
     setNewDayImageUrl(d.images[0] || "");
     setSectionsOpen((p) => ({ ...p, itinerary: true }));
@@ -1098,6 +1283,7 @@ export function ItineraryMaker({
     });
     setNewTransportInclusionInput("");
     setTransportInclusionsOpen(false);
+    setIsCabDropdownOpen(false);
   };
 
   const handleToggleTransportInclusion = (service: string) => {
@@ -1184,6 +1370,7 @@ export function ItineraryMaker({
         : [...DEFAULT_TRANSPORT_INCLUSIONS],
     });
     setTransportInclusionsOpen(false);
+    setIsCabDropdownOpen(false);
     setNewTransportInclusionInput("");
     setSectionsOpen((p) => ({ ...p, transport: true }));
   };
@@ -1212,6 +1399,7 @@ export function ItineraryMaker({
       mealPlan,
       theme,
       colorTheme: selectedTheme,
+      selectedTheme,
       includeCoverPage,
       subTotal,
       discountAmount,
@@ -1353,7 +1541,7 @@ export function ItineraryMaker({
         toast.success("Quotation saved successfully!");
       } catch (apiError) {
         console.warn("Backend itinerary sync unavailable, saved locally:", apiError);
-        toast.success("Quotation saved to Last 10 Quotations!");
+        toast.success("Quotation saved to Last 5 Quotations!");
       }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to save draft");
@@ -1371,11 +1559,11 @@ export function ItineraryMaker({
 
     try {
       // 1. Ensure all images are completely loaded & pre-convert remote images to Data URLs for 100% reliable PDF rendering
-      const cachedLogo = typeof window !== "undefined" ? localStorage.getItem("agency_company_logo_data") : null;
-      if (cachedLogo && cachedLogo.startsWith("data:image")) {
+      const activeLogo = user?.company_logo || (typeof window !== "undefined" ? localStorage.getItem("agency_company_logo_data") : null);
+      if (activeLogo && activeLogo.startsWith("data:image")) {
         const logoImgs = pdfRef.current.querySelectorAll("img[alt='HB'], img[alt='Agency'], img[alt*='HOLIDAYS'], img[alt*='Holidays']");
         logoImgs.forEach((img: any) => {
-          img.src = cachedLogo;
+          img.src = activeLogo;
         });
       }
 
@@ -2013,9 +2201,9 @@ Thank you for choosing ${user?.company_name || "us"}!`;
 
               {sectionsOpen.package && (
                 <div className="p-4 sm:p-6 border-t border-slate-100 space-y-5">
-                  {/* Segmented control: Full Package vs Customized */}
+                  {/* Segmented control: Customized vs Recent Package */}
                   <div className="flex p-1 rounded-xl bg-slate-100 w-fit">
-                    {(["Full Package", "Customized"] as const).map((type) => (
+                    {(["Customized", "Recent Package"] as const).map((type) => (
                       <button
                         key={type}
                         type="button"
@@ -2030,8 +2218,50 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div className="space-y-1.5 sm:col-span-2">
+                  {/* Dropdown for Recent Package (Last 5 Packages) */}
+                  {packageType === "Recent Package" && (
+                    <div className="space-y-2 p-3.5 rounded-xl border border-teal-200 bg-teal-50/70 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-bold text-teal-900 flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                          Select from Last 5 Packages
+                        </Label>
+                        {(selectedRecentPackageId || tripTitle || days.length > 0) && (
+                          <button
+                            type="button"
+                            onClick={handleClearPackageForm}
+                            className="text-[11px] text-teal-800 hover:text-teal-950 font-bold hover:underline cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <select
+                        value={selectedRecentPackageId}
+                        onChange={(e) => handleSelectRecentPackage(e.target.value)}
+                        className="w-full h-10 px-3 rounded-xl border border-teal-300 bg-white text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs"
+                      >
+                        <option value="">
+                          {recentPackages.length > 0
+                            ? "-- Choose a Recent Package to Auto-fill --"
+                            : "No recent packages found"}
+                        </option>
+                        {recentPackages.map((pkg, idx) => (
+                          <option key={pkg.id} value={pkg.id}>
+                            #{idx + 1}: {pkg.title} {pkg.daysCount ? `(${pkg.daysCount} Days)` : ""} {pkg.subtitle ? `· ${pkg.subtitle}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedRecentPackageId && (
+                        <p className="text-[11px] text-teal-700 font-medium">
+                          ✓ Package details and day itinerary loaded into the quotation form.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="space-y-1.5 sm:col-span-2 lg:col-span-2">
                       <Label className="text-xs font-semibold text-slate-600">Package / Trip Title</Label>
                       <Input
                         value={tripTitle}
@@ -2041,17 +2271,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       />
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-slate-600">Primary Destination</Label>
-                      <Input
-                        value={destination}
-                        onChange={(e) => setDestination(e.target.value)}
-                        placeholder="e.g. Kashmir / Dubai / Kerala"
-                        className="h-10 rounded-xl border-slate-200"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 col-span-1">
                       <Label className="text-xs font-semibold text-slate-600">Start Date</Label>
                       <Input
                         type="date"
@@ -2061,22 +2281,12 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       />
                     </div>
 
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 col-span-1">
                       <Label className="text-xs font-semibold text-slate-600">End Date</Label>
                       <Input
                         type="date"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
-                        className="h-10 rounded-xl border-slate-200"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-slate-600">Travel Style / Theme</Label>
-                      <Input
-                        value={theme}
-                        onChange={(e) => setTheme(e.target.value)}
-                        placeholder="Luxury / Honeymoon / Family / Adventure"
                         className="h-10 rounded-xl border-slate-200"
                       />
                     </div>
@@ -2116,7 +2326,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
               {sectionsOpen.itinerary && (
                 <div className="p-4 sm:p-6 border-t border-slate-100 space-y-6">
                   {/* Form to add or edit a day */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5 space-y-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5 space-y-4">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
                         {editingDayIndex !== null ? `Edit Day ${newDayNumber}` : "+ Add Day Itinerary"}
@@ -2139,7 +2349,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                     </div>
 
                     {/* Quick Fill Dropdown from Destination Library */}
-                    <div className="rounded-xl border border-teal-200 bg-teal-50/70 p-3.5 space-y-3 shadow-2xs">
+                    <div className="rounded-2xl border border-teal-200 bg-teal-50/60 p-3.5 sm:p-4 space-y-3 shadow-2xs">
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <div className="flex items-center gap-1.5 text-xs font-bold text-teal-900">
                           <Sparkles className="w-4 h-4 text-teal-600 shrink-0" />
@@ -2167,7 +2377,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                className="h-7 px-2.5 text-[11px] font-semibold text-teal-700 bg-white border-teal-300 hover:bg-teal-50 hover:text-teal-900 gap-1 shadow-2xs"
+                                className="h-7 px-3 text-xs font-semibold text-teal-700 bg-white border-teal-300 hover:bg-teal-50 hover:text-teal-900 gap-1 rounded-lg shadow-2xs"
                               >
                                 <Plus className="w-3.5 h-3.5 text-teal-600" />
                                 Add Destination
@@ -2179,8 +2389,8 @@ Thank you for choosing ${user?.company_name || "us"}!`;
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1">
-                          <Label className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
-                            1. Select Destination ({destLibrary.length})
+                          <Label className="text-[10px] font-bold uppercase tracking-wider text-teal-900">
+                            1. SELECT DESTINATION ({destLibrary.length})
                           </Label>
                           <select
                             value={selectedDestId}
@@ -2193,7 +2403,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                                 setDestination(found.name);
                               }
                             }}
-                            className="w-full h-9 px-3 rounded-lg border border-teal-300/80 bg-white text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs"
+                            className="w-full h-10 px-3 rounded-xl border border-teal-200 bg-white text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs"
                           >
                             <option value="">-- Choose Pre-fed Destination --</option>
                             {destLibrary.map((d) => (
@@ -2205,14 +2415,14 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         </div>
 
                         <div className="space-y-1">
-                          <Label className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
-                            2. Choose Itinerary Day from Dropdown
+                          <Label className="text-[10px] font-bold uppercase tracking-wider text-teal-900">
+                            2. CHOOSE ITINERARY DAY FROM DROPDOWN
                           </Label>
                           <select
                             disabled={!selectedDest || selectedDest.days.length === 0}
                             value={selectedDayTemplateId}
                             onChange={(e) => handleSelectDayTemplate(e.target.value)}
-                            className="w-full h-9 px-3 rounded-lg border border-teal-300/80 bg-white text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                            className="w-full h-10 px-3 rounded-xl border border-teal-200 bg-white text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
                           >
                             <option value="">
                               {selectedDest
@@ -2252,69 +2462,48 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-[11px] font-bold text-slate-600">Day Number</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          DAY {editingDayIndex !== null ? newDayNumber : days.length + 1} TITLE
+                        </Label>
                         <Input
-                          type="number"
-                          min="1"
-                          value={newDayNumber}
-                          onChange={(e) => setNewDayNumber(parseInt(e.target.value) || 1)}
-                          className="h-10 bg-white"
+                          value={newDayTitle}
+                          onChange={(e) => setNewDayTitle(e.target.value)}
+                          placeholder="e.g. Arrival & Leisure"
+                          className="h-11 rounded-xl bg-white border border-slate-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-1 focus-visible:ring-teal-500 shadow-2xs"
                         />
                       </div>
-                      <div className="space-y-1 sm:col-span-2">
-                        <Label className="text-[11px] font-bold text-slate-600">Destination / City</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                          PLACE (SUB-TITLE)
+                        </Label>
                         <Input
-                          list="day-destination-cities-list"
                           value={newDayDestination}
                           onChange={(e) => setNewDayDestination(e.target.value)}
-                          placeholder="e.g. Srinagar, Paris, Bali"
-                          className="h-10 bg-white"
+                          placeholder="e.g. Srinagar"
+                          className="h-11 rounded-xl bg-white border border-slate-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-1 focus-visible:ring-teal-500 shadow-2xs"
                         />
-                        <datalist id="day-destination-cities-list">
-                          {allKnownCities.map((c) => (
-                            <option key={c} value={c} />
-                          ))}
-                        </datalist>
                       </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-bold text-slate-600">Day Title / Headline</Label>
-                      <Input
-                        value={newDayTitle}
-                        onChange={(e) => setNewDayTitle(e.target.value)}
-                        placeholder="e.g. Arrival in Srinagar & Dal Lake Sunset Shikara Ride"
-                        className="h-10 bg-white"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-bold text-slate-600">Key Highlights</Label>
-                      <Input
-                        value={newDayHighlights}
-                        onChange={(e) => setNewDayHighlights(e.target.value)}
-                        placeholder="e.g. Airport transfer, Shikara ride, Boulevard road stroll"
-                        className="h-10 bg-white text-xs"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-[11px] font-bold text-slate-600">Day Description / Activities</Label>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        ACTIVITIES / DESCRIPTION
+                      </Label>
                       <Textarea
-                        rows={3}
+                        rows={4}
                         value={newDayDescription}
                         onChange={(e) => setNewDayDescription(e.target.value)}
-                        placeholder="Detailed itinerary points, sightseeing attractions, and activity breakdown..."
-                        className="bg-white resize-none text-sm"
+                        placeholder="Describe the day's highlights..."
+                        className="min-h-[120px] rounded-xl bg-white border border-slate-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:ring-1 focus-visible:ring-teal-500 shadow-2xs resize-y"
                       />
                     </div>
 
-                    {/* Image Upload Box Matching Screenshot */}
+                    {/* Day Image Section */}
                     <div className="space-y-1.5">
                       <Label className="text-[11px] font-bold text-slate-600">Day Image</Label>
-                      <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 bg-white text-center flex flex-col items-center justify-center gap-2 hover:border-teal-400 transition-colors">
+                      <div className="border-2 border-dashed border-slate-200 rounded-2xl p-5 bg-white text-center flex flex-col items-center justify-center gap-2 hover:border-teal-400 transition-colors">
                         {newDayImageUrl ? (
                           <div className="relative w-full max-w-xs h-32 rounded-lg overflow-hidden border border-slate-200 group">
                             <img src={newDayImageUrl} alt="Day preview" className="w-full h-full object-cover" />
@@ -2329,7 +2518,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                         ) : (
                           <>
                             <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
-                              <Upload className="w-5 h-5" />
+                              <Upload className="w-5 h-5 text-slate-400" />
                             </div>
                             <div className="text-xs text-slate-500">
                               <label className="font-semibold text-teal-700 hover:text-teal-800 cursor-pointer">
@@ -2349,7 +2538,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                                 placeholder="Or paste image URL (https://...)"
                                 value={newDayImageUrl}
                                 onChange={(e) => setNewDayImageUrl(e.target.value)}
-                                className="h-8 text-xs bg-slate-50 border-slate-200"
+                                className="h-9 text-xs bg-white rounded-xl border-slate-200"
                               />
                             </div>
                           </>
@@ -2357,9 +2546,9 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       </div>
                     </div>
 
-                    {/* Optional: Save to Destination Library toggle */}
-                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
-                      <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-700 font-medium">
+                    {/* Save to Destination Library toggle */}
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-200/90">
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-700 font-medium">
                         <input
                           type="checkbox"
                           checked={saveToLibrary}
@@ -2374,17 +2563,17 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                             value={targetDestNameForSave}
                             onChange={(e) => setTargetDestNameForSave(e.target.value)}
                             placeholder={newDayDestination || destination || "Destination name"}
-                            className="h-7 text-xs bg-white"
+                            className="h-7 text-xs bg-slate-50"
                           />
                         </div>
                       )}
                     </div>
 
-                    {/* Full width Teal button matching screenshot */}
+                    {/* Teal button matching Image 1 */}
                     <Button
                       type="button"
                       onClick={handleSaveDay}
-                      className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold h-11 rounded-xl shadow-sm transition-all"
+                      className="w-full bg-[#0d766e] hover:bg-[#0f6b63] text-white font-bold h-11 rounded-xl shadow-sm transition-all"
                     >
                       {editingDayIndex !== null ? "Update Day Itinerary" : "+ Add Day to Itinerary"}
                     </Button>
@@ -2412,9 +2601,16 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                             {/* Timeline Day Card with Small Image in side */}
                             <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/90 p-3.5 shadow-sm hover:border-sky-300 transition-all space-y-2">
                               <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
-                                <h4 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                                  Day {day.day}: {day.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, "")}
-                                </h4>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <h4 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                                    Day {day.day}: {day.title.replace(/^Day\s*\d+\s*[:\-]\s*/i, "")}
+                                  </h4>
+                                  {day.destination && (
+                                    <span className="text-[11px] font-semibold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-md shrink-0 border border-teal-200/60">
+                                      {day.destination}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
                                   {day.meals && (
                                     <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/90 text-[10px] font-semibold">
@@ -2606,7 +2802,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       <div className="space-y-1">
                         <Label className="text-[11px] font-bold text-slate-600">Hotel Name</Label>
                         <Input
-                          placeholder="e.g. Hotel Arco Srinagar"
+                          placeholder="e.g. Grand Palace Hotel"
                           value={hotelForm.hotelName}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -2632,8 +2828,8 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="space-y-1 sm:col-span-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
                         <div className="flex items-center justify-between">
                           <Label className="text-[11px] font-bold text-slate-600">Room Category</Label>
                           {matchedHotelRooms.length > 0 && (
@@ -2651,7 +2847,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                                   setHotelForm({ ...hotelForm, roomCategory: e.target.value });
                                 }
                               }}
-                              className="h-10 rounded-lg border border-slate-200 bg-teal-50/50 px-2.5 text-xs font-semibold text-teal-900 max-w-[170px] shrink-0"
+                              className="h-10 rounded-lg border border-slate-200 bg-teal-50/50 px-2.5 text-xs font-semibold text-teal-900 max-w-[150px] sm:max-w-[170px] shrink-0"
                             >
                               <option value="">Select Room...</option>
                               {matchedHotelRooms.map((rm, idx) => (
@@ -2665,7 +2861,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                             placeholder="Deluxe Room / Suite"
                             value={hotelForm.roomCategory}
                             onChange={(e) => setHotelForm({ ...hotelForm, roomCategory: e.target.value })}
-                            className="h-10 bg-white text-xs flex-1"
+                            className="h-10 bg-white text-xs flex-1 min-w-0"
                           />
                         </div>
 
@@ -2691,13 +2887,69 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                       </div>
 
                       <div className="space-y-1">
-                        <Label className="text-[11px] font-bold text-slate-600">Meal Plan</Label>
-                        <Input
-                          placeholder="MAP / CP / EP / AP"
-                          value={hotelForm.mealPlan}
-                          onChange={(e) => setHotelForm({ ...hotelForm, mealPlan: e.target.value })}
-                          className="h-10 bg-white text-xs"
-                        />
+                        <div className="flex items-center justify-between">
+                          <Label className="text-[11px] font-bold text-slate-600">Meal Plan</Label>
+                          <span className="text-[10px] text-teal-700 font-semibold">
+                            {HOTEL_MEAL_PLAN_OPTIONS.length} plans available
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <select
+                            value={
+                              HOTEL_MEAL_PLAN_OPTIONS.find(
+                                (opt) => opt.toLowerCase() === (hotelForm.mealPlan || "").trim().toLowerCase()
+                              ) ||
+                              HOTEL_MEAL_PLAN_OPTIONS.find((opt) => {
+                                const optCode = opt.split(" ")[0].toUpperCase();
+                                const formCode = (hotelForm.mealPlan || "").trim().split(" ")[0].toUpperCase();
+                                return optCode && formCode && optCode === formCode;
+                              }) ||
+                              ""
+                            }
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setHotelForm({ ...hotelForm, mealPlan: e.target.value });
+                              }
+                            }}
+                            className="h-10 rounded-lg border border-slate-200 bg-teal-50/50 px-2.5 text-xs font-semibold text-teal-900 max-w-[150px] sm:max-w-[170px] shrink-0"
+                          >
+                            <option value="">Select Plan...</option>
+                            {HOTEL_MEAL_PLAN_OPTIONS.map((mp, idx) => (
+                              <option key={idx} value={mp}>
+                                {mp}
+                              </option>
+                            ))}
+                          </select>
+                          <Input
+                            placeholder="MAP / CP / EP / AP"
+                            value={hotelForm.mealPlan}
+                            onChange={(e) => setHotelForm({ ...hotelForm, mealPlan: e.target.value })}
+                            className="h-10 bg-white text-xs flex-1 min-w-0"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <span className="text-[10px] text-slate-400">Quick Pick:</span>
+                          {HOTEL_MEAL_PLAN_QUICK_PICKS.map((qp, idx) => {
+                            const isSelected =
+                              hotelForm.mealPlan === qp.full ||
+                              (hotelForm.mealPlan || "").trim().toUpperCase().startsWith(qp.code);
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setHotelForm({ ...hotelForm, mealPlan: qp.full })}
+                                className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
+                                  isSelected
+                                    ? "bg-teal-700 text-white border-teal-700 shadow-2xs"
+                                    : "bg-white text-slate-700 border-slate-200 hover:border-teal-400 hover:bg-teal-50"
+                                }`}
+                              >
+                                {qp.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
@@ -2984,13 +3236,107 @@ Thank you for choosing ${user?.company_name || "us"}!`;
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="space-y-1 sm:col-span-2">
-                        <Label className="text-[11px] font-bold text-slate-600">Vehicle Type</Label>
-                        <Input
-                          placeholder="e.g. Sedan / Innova Crysta / Tempo Traveller"
-                          value={transportForm.vehicleType}
-                          onChange={(e) => setTransportForm({ ...transportForm, vehicleType: e.target.value })}
-                          className="h-10 bg-white"
-                        />
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="transport-vehicle-type" className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                            <Car className="w-3.5 h-3.5 text-teal-600" />
+                            <span>Vehicle Type</span>
+                          </Label>
+                          <span className="text-[10px] text-slate-400 font-medium">
+                            Select from dropdown or type custom
+                          </span>
+                        </div>
+
+                        {/* Editable Dropdown Combo Container */}
+                        <div ref={cabDropdownRef} className="relative">
+                          <div className="relative flex items-center">
+                            <Input
+                              id="transport-vehicle-type"
+                              list="cab-vehicle-types"
+                              placeholder="e.g. Sedan / Innova Crysta / Tempo Traveller"
+                              value={transportForm.vehicleType}
+                              onChange={(e) => setTransportForm({ ...transportForm, vehicleType: e.target.value })}
+                              className="h-10 bg-white pr-24 text-xs font-medium border-slate-200 focus-visible:ring-teal-500"
+                              autoComplete="off"
+                            />
+                            <datalist id="cab-vehicle-types">
+                              {POPULAR_CAB_NAMES.map((cab) => (
+                                <option key={cab} value={cab} />
+                              ))}
+                            </datalist>
+
+                            {/* Dropdown toggle button inside the input */}
+                            <button
+                              type="button"
+                              onClick={() => setIsCabDropdownOpen((prev) => !prev)}
+                              className="absolute right-1.5 h-7 px-2.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-800 text-[11px] font-bold flex items-center gap-1 border border-teal-200/80 transition-colors cursor-pointer shadow-2xs"
+                              title="Choose from popular cab options"
+                              aria-haspopup="listbox"
+                              aria-expanded={isCabDropdownOpen}
+                            >
+                              <span>Cabs</span>
+                              <ChevronDown className={cn("w-3.5 h-3.5 text-teal-600 transition-transform duration-200", isCabDropdownOpen && "rotate-180")} />
+                            </button>
+                          </div>
+
+                          {/* Floating Dropdown Menu */}
+                          {isCabDropdownOpen && (
+                            <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden py-1 animate-in fade-in-50 zoom-in-95">
+                              <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                                <span>Popular Cabs & Vehicles</span>
+                                <span className="text-[10px] text-teal-600 font-semibold lowercase">Click to choose & edit</span>
+                              </div>
+                              <div className="max-h-60 overflow-y-auto divide-y divide-slate-50">
+                                {POPULAR_CAB_NAMES.map((cab) => {
+                                  const isSelected = transportForm.vehicleType.trim().toLowerCase() === cab.toLowerCase();
+                                  return (
+                                    <button
+                                      key={cab}
+                                      type="button"
+                                      onClick={() => {
+                                        setTransportForm({ ...transportForm, vehicleType: cab });
+                                        setIsCabDropdownOpen(false);
+                                      }}
+                                      className={cn(
+                                        "w-full text-left px-3.5 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer",
+                                        isSelected
+                                          ? "bg-teal-50/80 text-teal-900 font-bold"
+                                          : "text-slate-700 hover:bg-slate-50 font-medium"
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <Car className={cn("w-3.5 h-3.5", isSelected ? "text-teal-600" : "text-slate-400")} />
+                                        <span>{cab}</span>
+                                      </div>
+                                      {isSelected && <Check className="w-4 h-4 text-teal-600" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Quick-Select Pills */}
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                            {POPULAR_CAB_NAMES.map((cab) => {
+                              const isSelected = transportForm.vehicleType.trim().toLowerCase() === cab.toLowerCase();
+                              return (
+                                <button
+                                  key={cab}
+                                  type="button"
+                                  onClick={() => setTransportForm({ ...transportForm, vehicleType: cab })}
+                                  className={cn(
+                                    "text-[10px] px-2 py-0.5 rounded-md border transition-all cursor-pointer font-medium",
+                                    isSelected
+                                      ? "bg-teal-600 text-white border-teal-600 shadow-2xs font-bold"
+                                      : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 hover:border-slate-300"
+                                  )}
+                                >
+                                  {cab}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <Label className="text-[11px] font-bold text-slate-600">No. of Vehicles</Label>

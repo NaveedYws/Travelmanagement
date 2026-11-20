@@ -10,6 +10,8 @@ export interface User {
   company_email?: string;
   company_address?: string;
   company_website?: string;
+  company_facebook?: string;
+  company_instagram?: string;
   bank_name?: string;
   bank_account_name?: string;
   bank_account_no?: string;

@@ -6,6 +6,7 @@ import {
 import {
   getRecentQuotations,
   getStoredQuotations,
+  fetchQuotationsFromDb,
   updateQuotationStatus,
   deleteQuotation,
   QUOTATIONS_UPDATED_EVENT,
@@ -61,17 +62,21 @@ export function RecentQuotationsPage({
   onGoToLeadBoard,
 }: RecentQuotationsPageProps) {
   const [quotations, setQuotations] = useState<SavedQuotation[]>(() =>
-    getRecentQuotations(10)
+    getRecentQuotations(5)
   );
   const [totalCount, setTotalCount] = useState<number>(() =>
     getStoredQuotations().length
   );
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Sync with localStorage & custom quotation events
+  // Sync with Database & localStorage & custom quotation events
+  useEffect(() => {
+    fetchQuotationsFromDb().catch(() => {});
+  }, []);
+
   useEffect(() => {
     const handleUpdate = () => {
-      setQuotations(getRecentQuotations(10));
+      setQuotations(getRecentQuotations(5));
       setTotalCount(getStoredQuotations().length);
     };
     handleUpdate();
@@ -153,7 +158,7 @@ export function RecentQuotationsPage({
     );
   }, [quotations, searchQuery]);
 
-  // Total value of the last 10 quotations
+  // Total value of the last 5 quotations
   const totalValue = useMemo(() => {
     return quotations.reduce(
       (acc, q) => acc + (Number(q.finalQuotationTotal) || 0),
@@ -172,10 +177,10 @@ export function RecentQuotationsPage({
             </span>
             <div>
               <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                Last 10 Quotations
+                Last 5 Quotations
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                View, manage, and edit your 10 most recent quotation drafts and packages.
+                View, manage, and edit your 5 most recent quotation drafts and packages.
               </p>
             </div>
           </div>

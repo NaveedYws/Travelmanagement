@@ -19,7 +19,9 @@ import {
   CheckCircle2,
   Sparkles,
   Camera,
-  Loader2
+  Loader2,
+  Facebook,
+  Instagram
 } from "lucide-react";
 
 export function CompanyProfileSettings() {
@@ -32,6 +34,8 @@ export function CompanyProfileSettings() {
     company_email: "",
     company_address: "",
     company_website: "",
+    company_facebook: "",
+    company_instagram: "",
     bank_name: "",
     bank_account_name: "",
     bank_account_no: "",
@@ -48,18 +52,22 @@ export function CompanyProfileSettings() {
 
   useEffect(() => {
     let localProfile: any = {};
+    let cachedLogo = "";
     try {
       const raw = localStorage.getItem("agency_company_profile");
       if (raw) localProfile = JSON.parse(raw);
+      cachedLogo = localStorage.getItem("agency_company_logo_data") || "";
     } catch {}
 
     setFormData({
       company_name: user?.company_name || localProfile.company_name || "",
-      company_logo: user?.company_logo || localProfile.company_logo || "",
+      company_logo: user?.company_logo || localProfile.company_logo || cachedLogo || "",
       company_phone: user?.company_phone || localProfile.company_phone || "",
       company_email: user?.company_email || user?.email || localProfile.company_email || "",
       company_address: user?.company_address || localProfile.company_address || "",
       company_website: user?.company_website || localProfile.company_website || "",
+      company_facebook: user?.company_facebook || localProfile.company_facebook || localProfile.facebook || "",
+      company_instagram: user?.company_instagram || localProfile.company_instagram || localProfile.instagram || "",
       bank_name: user?.bank_name || localProfile.bank_name || "",
       bank_account_name: user?.bank_account_name || localProfile.bank_account_name || "",
       bank_account_no: user?.bank_account_no || localProfile.bank_account_no || "",
@@ -79,39 +87,44 @@ export function CompanyProfileSettings() {
       return;
     }
 
-    // Instant local base64 preview so it works 100% reliably
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setFormData((prev) => {
-        const next = { ...prev, company_logo: dataUrl };
-        try {
-          localStorage.setItem("agency_company_profile", JSON.stringify(next));
-          localStorage.setItem("agency_company_logo_data", dataUrl);
-          window.dispatchEvent(new Event("agency_profile_updated"));
-        } catch {}
-        return next;
-      });
-      toast.success("Logo loaded successfully!");
-    };
-    reader.readAsDataURL(file);
-
+    setIsUploadingLogo(true);
     try {
-      setIsUploadingLogo(true);
-      const res = await api.upload(file);
-      if (res.publicUrl) {
-        setFormData((prev) => {
-          const next = { ...prev, company_logo: res.publicUrl };
-          try {
-            localStorage.setItem("agency_company_profile", JSON.stringify(next));
-            window.dispatchEvent(new Event("agency_profile_updated"));
-          } catch {}
-          return next;
-        });
+      // 1. Read base64 for instant local display and fallback
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      // Update immediate preview
+      setFormData((prev) => ({ ...prev, company_logo: dataUrl }));
+
+      // 2. Upload to server to get permanent public URL
+      let finalLogo = dataUrl;
+      try {
+        const res = await api.upload(file);
+        if (res && res.publicUrl) {
+          finalLogo = res.publicUrl;
+        }
+      } catch (uploadErr) {
+        console.warn("Server file upload endpoint error, saving base64 directly to database:", uploadErr);
       }
+
+      // 3. Persist to state and storage
+      const updatedProfile = { ...formData, company_logo: finalLogo };
+      setFormData(updatedProfile);
+      try {
+        localStorage.setItem("agency_company_profile", JSON.stringify(updatedProfile));
+        localStorage.setItem("agency_company_logo_data", finalLogo);
+        window.dispatchEvent(new Event("agency_profile_updated"));
+      } catch {}
+
+      // 4. Save directly to database so all tabs, browsers, and devices immediately reflect it!
+      await updateProfile(updatedProfile);
+      toast.success("Logo uploaded and saved to database successfully!");
     } catch (err: any) {
-      // Local Data URL is already saved, so upload failure won't break it
-      console.warn("Server upload skipped, using local data URL:", err.message);
+      console.error("Error saving logo:", err);
+      toast.error(err?.message || "Failed to save logo to database");
     } finally {
       setIsUploadingLogo(false);
       e.target.value = "";
@@ -127,38 +140,38 @@ export function CompanyProfileSettings() {
       return;
     }
 
-    // Instant local base64 preview so it works 100% reliably
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setFormData((prev) => {
-        const next = { ...prev, bank_qr: dataUrl };
-        try {
-          localStorage.setItem("agency_company_profile", JSON.stringify(next));
-          localStorage.setItem("agency_bank_qr_data", dataUrl);
-          window.dispatchEvent(new Event("agency_profile_updated"));
-        } catch {}
-        return next;
-      });
-      toast.success("Payment QR code loaded successfully!");
-    };
-    reader.readAsDataURL(file);
-
+    setIsUploadingQr(true);
     try {
-      setIsUploadingQr(true);
-      const res = await api.upload(file);
-      if (res.publicUrl) {
-        setFormData((prev) => {
-          const next = { ...prev, bank_qr: res.publicUrl };
-          try {
-            localStorage.setItem("agency_company_profile", JSON.stringify(next));
-            window.dispatchEvent(new Event("agency_profile_updated"));
-          } catch {}
-          return next;
-        });
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      setFormData((prev) => ({ ...prev, bank_qr: dataUrl }));
+
+      let finalQr = dataUrl;
+      try {
+        const res = await api.upload(file);
+        if (res && res.publicUrl) {
+          finalQr = res.publicUrl;
+        }
+      } catch (uploadErr) {
+        console.warn("Server upload skipped, using direct data URL:", uploadErr);
       }
+
+      const updatedProfile = { ...formData, bank_qr: finalQr };
+      setFormData(updatedProfile);
+      try {
+        localStorage.setItem("agency_company_profile", JSON.stringify(updatedProfile));
+        localStorage.setItem("agency_bank_qr_data", finalQr);
+        window.dispatchEvent(new Event("agency_profile_updated"));
+      } catch {}
+
+      await updateProfile(updatedProfile);
+      toast.success("Payment QR code uploaded and saved to database successfully!");
     } catch (err: any) {
-      console.warn("Server upload skipped, using local data URL:", err.message);
+      toast.error(err?.message || "Failed to save QR code to database");
     } finally {
       setIsUploadingQr(false);
       e.target.value = "";
@@ -174,36 +187,38 @@ export function CompanyProfileSettings() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setFormData((prev) => {
-        const next = { ...prev, reviews_banner: dataUrl };
-        try {
-          localStorage.setItem("agency_company_profile", JSON.stringify(next));
-          localStorage.setItem("agency_reviews_banner_data", dataUrl);
-          window.dispatchEvent(new Event("agency_profile_updated"));
-        } catch {}
-        return next;
-      });
-      toast.success("Reviews banner updated successfully!");
-    };
-    reader.readAsDataURL(file);
-
+    setIsUploadingReviews(true);
     try {
-      setIsUploadingReviews(true);
-      const res = await api.upload(file);
-      if (res.publicUrl) {
-        setFormData((prev) => {
-          const next = { ...prev, reviews_banner: res.publicUrl };
-          try {
-            localStorage.setItem("agency_company_profile", JSON.stringify(next));
-          } catch {}
-          return next;
-        });
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+
+      setFormData((prev) => ({ ...prev, reviews_banner: dataUrl }));
+
+      let finalBanner = dataUrl;
+      try {
+        const res = await api.upload(file);
+        if (res && res.publicUrl) {
+          finalBanner = res.publicUrl;
+        }
+      } catch (uploadErr) {
+        console.warn("Server upload skipped, using direct data URL:", uploadErr);
       }
+
+      const updatedProfile = { ...formData, reviews_banner: finalBanner };
+      setFormData(updatedProfile);
+      try {
+        localStorage.setItem("agency_company_profile", JSON.stringify(updatedProfile));
+        localStorage.setItem("agency_reviews_banner_data", finalBanner);
+        window.dispatchEvent(new Event("agency_profile_updated"));
+      } catch {}
+
+      await updateProfile(updatedProfile);
+      toast.success("Reviews banner uploaded and saved to database successfully!");
     } catch (err: any) {
-      console.warn("Server upload skipped, using local data URL:", err.message);
+      toast.error(err?.message || "Failed to save reviews banner to database");
     } finally {
       setIsUploadingReviews(false);
       e.target.value = "";
@@ -228,13 +243,19 @@ export function CompanyProfileSettings() {
       // Persist to local storage immediately
       try {
         localStorage.setItem("agency_company_profile", JSON.stringify(formData));
+        if (formData.company_logo) {
+          localStorage.setItem("agency_company_logo_data", formData.company_logo);
+        } else {
+          localStorage.removeItem("agency_company_logo_data");
+        }
         window.dispatchEvent(new Event("agency_profile_updated"));
       } catch {}
 
       await updateProfile(formData);
-      toast.success("Company profile & bank details saved successfully!");
+      toast.success("Company profile & bank details saved to database successfully!");
     } catch (err: any) {
-      toast.success("Profile saved locally!");
+      console.error("Failed to save profile to database:", err);
+      toast.error(err?.message || "Failed to save profile to database");
     } finally {
       setIsSaving(false);
     }
@@ -264,6 +285,12 @@ export function CompanyProfileSettings() {
                 src={resolveImageUrl(formData.company_logo)}
                 alt="Company Logo"
                 className="w-full h-full object-contain p-1.5"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (target.src !== formData.company_logo && formData.company_logo) {
+                    target.src = formData.company_logo;
+                  }
+                }}
               />
             ) : (
               <div className="text-center p-2 text-slate-400">
@@ -297,14 +324,18 @@ export function CompanyProfileSettings() {
               {formData.company_logo && (
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     const next = { ...formData, company_logo: "" };
                     setFormData(next);
                     try {
                       localStorage.setItem("agency_company_profile", JSON.stringify(next));
                       localStorage.removeItem("agency_company_logo_data");
                       window.dispatchEvent(new Event("agency_profile_updated"));
-                    } catch {}
+                      await updateProfile(next);
+                      toast.success("Logo removed from database");
+                    } catch (err) {
+                      console.warn("Could not sync logo removal to server:", err);
+                    }
                   }}
                   className="text-xs text-red-500 hover:text-red-700 font-medium cursor-pointer"
                 >
@@ -397,6 +428,38 @@ export function CompanyProfileSettings() {
                 className="pl-9 text-xs rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950"
                 value={formData.company_website}
                 onChange={(e) => updateFormField("company_website", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="company_facebook" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Facebook Page / Link
+            </Label>
+            <div className="relative">
+              <Facebook className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-blue-600 dark:text-blue-400" />
+              <Input
+                id="company_facebook"
+                placeholder="e.g. facebook.com/holidaysbindas or @holidaysbindas"
+                className="pl-9 text-xs rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950"
+                value={formData.company_facebook}
+                onChange={(e) => updateFormField("company_facebook", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="company_instagram" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Instagram Profile / Link
+            </Label>
+            <div className="relative">
+              <Instagram className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-pink-600 dark:text-pink-400" />
+              <Input
+                id="company_instagram"
+                placeholder="e.g. instagram.com/holidaysbindas or @holidaysbindas"
+                className="pl-9 text-xs rounded-xl border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950"
+                value={formData.company_instagram}
+                onChange={(e) => updateFormField("company_instagram", e.target.value)}
               />
             </div>
           </div>

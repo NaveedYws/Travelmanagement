@@ -1,4 +1,5 @@
 import { SavedQuotation, QuotationLeadStatus } from "./types";
+import { api } from "./api";
 
 const STORAGE_KEY = "travel_quotations_v1";
 export const QUOTATIONS_UPDATED_EVENT = "quotations_updated";
@@ -84,7 +85,144 @@ export function getRecentQuotations(limit = 5): SavedQuotation[] {
 }
 
 /**
- * Saves or updates a quotation in localStorage and broadcasts an update event.
+ * Background async save to database API
+ */
+async function apiSaveQuotation(quotation: SavedQuotation): Promise<SavedQuotation | null> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (!token) return null;
+
+  try {
+    const res = await api.post<{ status: string; id?: string; quotation?: SavedQuotation }>(
+      "/api/quotations/index.php",
+      quotation
+    );
+    if (res?.quotation) {
+      return res.quotation;
+    }
+    return quotation;
+  } catch (err) {
+    console.warn("Database sync for quotation failed (cached locally):", err);
+    return null;
+  }
+}
+
+/**
+ * Background async update to database API
+ */
+async function apiUpdateQuotation(
+  id: string,
+  updates: Partial<SavedQuotation>
+): Promise<SavedQuotation | null> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (!token) return null;
+
+  try {
+    const res = await api.put<{ status: string; quotation?: SavedQuotation }>(
+      "/api/quotations/index.php",
+      { id, ...updates }
+    );
+    return res?.quotation || null;
+  } catch (err) {
+    console.warn("Database update for quotation failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Background async delete from database API
+ */
+async function apiDeleteQuotation(id: string): Promise<boolean> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (!token) return false;
+
+  try {
+    await api.delete(`/api/quotations/index.php?id=${encodeURIComponent(id)}`);
+    return true;
+  } catch (err) {
+    console.warn("Database delete for quotation failed:", err);
+    return false;
+  }
+}
+
+/**
+ * Fetches all quotations from the database.
+ * If user logs in from another device, this pulls all saved quotations into the device.
+ * If database is empty but local storage has existing quotations, auto-syncs them to database.
+ */
+export async function fetchQuotationsFromDb(): Promise<SavedQuotation[]> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (!token) {
+    return getStoredQuotations();
+  }
+
+  try {
+    const res = await api.get<{ status?: string; quotations?: SavedQuotation[] }>(
+      "/api/quotations/index.php"
+    );
+
+    if (res && Array.isArray(res.quotations)) {
+      if (res.quotations.length > 0) {
+        // We received quotations from the database (e.g. from another device or prior sessions)
+        persistQuotations(res.quotations);
+        return sortByUpdatedDesc(res.quotations);
+      } else {
+        // Database is currently empty for this user. Check if we have local quotes to auto-migrate to DB
+        const local = getStoredQuotations();
+        if (local.length > 0) {
+          syncQuotationsToDatabase(local).catch(() => {});
+        }
+        return local;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch quotations from database, falling back to local cache:", err);
+  }
+
+  return getStoredQuotations();
+}
+
+/**
+ * Syncs an array of quotations to the database in batch.
+ */
+export async function syncQuotationsToDatabase(
+  items?: SavedQuotation[]
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (!token) {
+    return { success: false, count: 0, error: "Please log in to sync quotations with database" };
+  }
+
+  const toSync = items || getStoredQuotations();
+  if (toSync.length === 0) return { success: true, count: 0 };
+
+  try {
+    const res = await api.post<{ status: string; quotations?: SavedQuotation[] }>(
+      "/api/quotations/index.php",
+      { quotations: toSync }
+    );
+
+    if (res && Array.isArray(res.quotations) && res.quotations.length > 0) {
+      persistQuotations(res.quotations);
+      return { success: true, count: res.quotations.length };
+    }
+    return { success: true, count: toSync.length };
+  } catch (batchErr: any) {
+    console.warn("Batch quotation sync failed, trying individually:", batchErr);
+    let savedCount = 0;
+    for (const q of toSync) {
+      try {
+        await api.post("/api/quotations/index.php", q);
+        savedCount++;
+      } catch (err) {
+        console.warn(`Failed to sync quotation ${q.id} to database:`, err);
+      }
+    }
+    return { success: savedCount > 0, count: savedCount };
+  }
+}
+
+/**
+ * Saves or updates a quotation locally AND syncs to database.
  */
 export function saveQuotation(input: SaveQuotationInput): SavedQuotation {
   const current = getStoredQuotations();
@@ -111,11 +249,15 @@ export function saveQuotation(input: SaveQuotationInput): SavedQuotation {
       : [saved, ...current];
 
   persistQuotations(next);
+
+  // Background async save to database so other devices can see it
+  apiSaveQuotation(saved).catch(() => {});
+
   return saved;
 }
 
 /**
- * Updates status of a stored quotation and broadcasts an update event.
+ * Updates status of a quotation locally and in the database.
  */
 export function updateQuotationStatus(
   id: string,
@@ -132,11 +274,15 @@ export function updateQuotationStatus(
   };
   const next = current.map((q) => (q.id === id ? updated : q));
   persistQuotations(next);
+
+  // Background async update to database
+  apiUpdateQuotation(id, { status }).catch(() => {});
+
   return updated;
 }
 
 /**
- * Updates partial fields of a stored quotation.
+ * Updates partial fields of a quotation locally and in the database.
  */
 export function updateQuotation(
   id: string,
@@ -153,14 +299,21 @@ export function updateQuotation(
   };
   const next = current.map((q) => (q.id === id ? updated : q));
   persistQuotations(next);
+
+  // Background async update to database
+  apiUpdateQuotation(id, updates).catch(() => {});
+
   return updated;
 }
 
 /**
- * Deletes a quotation by ID from localStorage.
+ * Deletes a quotation by ID locally and in the database.
  */
 export function deleteQuotation(id: string): void {
   const current = getStoredQuotations();
   const next = current.filter((q) => q.id !== id);
   persistQuotations(next);
+
+  // Background async delete from database
+  apiDeleteQuotation(id).catch(() => {});
 }

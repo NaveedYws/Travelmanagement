@@ -5,6 +5,7 @@ import {
 } from "@/lib/types";
 import {
   getStoredQuotations,
+  fetchQuotationsFromDb,
   updateQuotationStatus,
   deleteQuotation,
   QUOTATIONS_UPDATED_EVENT,
@@ -160,7 +161,11 @@ export function LeadBoard({ onOpenQuotation, onGoToPayments }: LeadBoardProps) {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "amount_desc" | "amount_asc" | "name">("newest");
   const [selectedLead, setSelectedLead] = useState<SavedQuotation | null>(null);
 
-  // Sync with localStorage & custom quotation events
+  // Sync with Database & localStorage & custom quotation events
+  useEffect(() => {
+    fetchQuotationsFromDb().catch(() => {});
+  }, []);
+
   useEffect(() => {
     const handleUpdate = () => {
       setQuotations(getStoredQuotations());

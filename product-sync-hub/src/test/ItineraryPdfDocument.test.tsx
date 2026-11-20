@@ -4,6 +4,8 @@ import {
   ItineraryPdfDocument,
   ItineraryPdfData,
   planContentPages,
+  resolvePdfTheme,
+  PDF_THEMES,
 } from "@/components/ItineraryPdfDocument";
 
 const makeDay = (day: number, title: string, bullets: string[]) => ({
@@ -358,5 +360,113 @@ describe("ItineraryPdfDocument uniform text sizes", () => {
     const placedOnPage1 = pages[0].hotels?.list.length || 0;
     expect(placedOnPage1).toBeLessThan(manyHotels.length);
     expect(pages[1].hotels?.startNight).toBe(1 + placedOnPage1 * 2);
+  });
+
+  it("applies selectedTheme / colorTheme palette colors dynamically to headings, badges, and footers", () => {
+    // 1. Verify theme resolver for all palette items
+    expect(resolvePdfTheme("teal").id).toBe("teal");
+    expect(resolvePdfTheme("blue").id).toBe("blue");
+    expect(resolvePdfTheme("indigo").id).toBe("indigo");
+    expect(resolvePdfTheme("emerald").id).toBe("emerald");
+    expect(resolvePdfTheme("rose").id).toBe("rose");
+    expect(resolvePdfTheme("amber").id).toBe("amber");
+    expect(resolvePdfTheme("slate").id).toBe("slate");
+
+    // 2. Render with "rose" theme
+    const { container: roseContainer } = render(
+      <ItineraryPdfDocument
+        data={{
+          ...sampleData,
+          colorTheme: "rose",
+        }}
+        user={{
+          id: 1,
+          email: "agent@example.com",
+          company_name: "Holidays Bindas",
+        }}
+      />
+    );
+
+    // Section headings should have rose primary color (rgb(190, 18, 60) for #be123c)
+    const headings = roseContainer.querySelectorAll("h3");
+    expect(headings.length).toBeGreaterThan(0);
+    const dayHeading = Array.from(headings).find((h) =>
+      h.textContent?.includes("DETAILED DAY-WISE TOUR ITINERARY")
+    );
+    expect((dayHeading as HTMLElement)?.style.color).toBe("rgb(190, 18, 60)");
+
+    // Day badge circles should have rose primary color
+    const dayCircles = roseContainer.querySelectorAll(".rounded-full");
+    const day1Badge = Array.from(dayCircles).find((el) => el.textContent === "1");
+    expect((day1Badge as HTMLElement)?.style.backgroundColor).toBe("rgb(190, 18, 60)");
+
+    // Footer bar should have rose footer color (rgb(136, 19, 55) for #881337)
+    const footers = roseContainer.querySelectorAll(".h-7");
+    expect(footers.length).toBeGreaterThan(0);
+    expect((footers[0] as HTMLElement)?.style.backgroundColor).toBe("rgb(136, 19, 55)");
+
+    // 3. Render with "blue" theme
+    const { container: blueContainer } = render(
+      <ItineraryPdfDocument
+        data={{
+          ...sampleData,
+          selectedTheme: "blue",
+        }}
+        user={{
+          id: 1,
+          email: "agent@example.com",
+          company_name: "Holidays Bindas",
+        }}
+      />
+    );
+
+    const blueHeadings = blueContainer.querySelectorAll("h3");
+    const blueDayHeading = Array.from(blueHeadings).find((h) =>
+      h.textContent?.includes("DETAILED DAY-WISE TOUR ITINERARY")
+    );
+    expect((blueDayHeading as HTMLElement)?.style.color).toBe("rgb(29, 78, 216)");
+
+    const blueFooters = blueContainer.querySelectorAll(".h-7");
+    expect((blueFooters[0] as HTMLElement)?.style.backgroundColor).toBe("rgb(30, 58, 138)");
+  });
+
+  it("renders dynamic company website, phone number, and facebook/instagram social links with icons in page footer", () => {
+    const { container } = render(
+      <ItineraryPdfDocument
+        data={sampleData}
+        user={{
+          id: 1,
+          email: "support@customtravels.com",
+          company_name: "Custom Travels",
+          company_website: "https://www.customtravels.com",
+          company_phone: "+91 9876543210",
+          company_instagram: "@custom_travels",
+          company_facebook: "facebook.com/customtravelspage",
+        }}
+      />
+    );
+
+    const footers = container.querySelectorAll(".h-7");
+    expect(footers.length).toBeGreaterThan(0);
+
+    const firstFooter = footers[0] as HTMLElement;
+    expect(firstFooter.textContent).toMatch(/custom travels/i);
+    expect(firstFooter.textContent).toContain("customtravels.com");
+    expect(firstFooter.textContent).toContain("Ph: +91 9876543210");
+    expect(firstFooter.textContent).toContain("@custom_travels");
+    expect(firstFooter.textContent).toContain("customtravelspage");
+
+    // Verify social links have Instagram and Facebook SVG icons
+    const footerSvgs = firstFooter.querySelectorAll("svg");
+    expect(footerSvgs.length).toBe(2);
+
+    // Verify links have correct href
+    const instaLink = firstFooter.querySelector('a[href*="instagram.com"]') as HTMLAnchorElement;
+    expect(instaLink).toBeTruthy();
+    expect(instaLink.href).toContain("instagram.com/custom_travels");
+
+    const fbLink = firstFooter.querySelector('a[href*="facebook.com"]') as HTMLAnchorElement;
+    expect(fbLink).toBeTruthy();
+    expect(fbLink.href).toContain("facebook.com/customtravelspage");
   });
 });

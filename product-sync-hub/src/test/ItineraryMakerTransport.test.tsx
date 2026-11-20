@@ -62,4 +62,44 @@ describe("ItineraryMaker Transport From/To Dates and Included Services dropdown"
     expect(within(savedCard).queryByText("Parking Fees")).not.toBeInTheDocument();
     expect(within(savedCard).queryByText("Fuel Charges")).not.toBeInTheDocument();
   }, 20000);
+
+  it("shows editable dropdown with popular cab names, allows selecting from dropdown and editing the text", () => {
+    render(<ItineraryMaker />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Create Itinerary/i }));
+
+    const vehicleInput = screen.getByPlaceholderText(
+      "e.g. Sedan / Innova Crysta / Tempo Traveller"
+    ) as HTMLInputElement;
+
+    // Open Cabs dropdown
+    const cabsDropdownBtn = screen.getByRole("button", { name: /Cabs/i });
+    fireEvent.click(cabsDropdownBtn);
+
+    // Verify popular cabs are present (in both dropdown menu and quick-select pills)
+    expect(screen.getAllByText("Sedan (Dzire / Etios)").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Innova Crysta").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Maruti Ertiga").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Toyota Innova").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Tempo Traveller (12 / 17 Seater)").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("Force Urbania").length).toBeGreaterThanOrEqual(2);
+
+    // Click "Tempo Traveller (12 / 17 Seater)" from the dropdown
+    const tempoOptions = screen.getAllByText("Tempo Traveller (12 / 17 Seater)");
+    fireEvent.click(tempoOptions[0]);
+
+    // Verify input value was updated
+    expect(vehicleInput.value).toBe("Tempo Traveller (12 / 17 Seater)");
+
+    // User can edit the text directly (e.g. add AC Luxury)
+    fireEvent.change(vehicleInput, {
+      target: { value: "Tempo Traveller (12 / 17 Seater) - AC Luxury" },
+    });
+    expect(vehicleInput.value).toBe("Tempo Traveller (12 / 17 Seater) - AC Luxury");
+
+    // Click quick pill for "Force Urbania"
+    const urbaniaPills = screen.getAllByRole("button", { name: "Force Urbania" });
+    fireEvent.click(urbaniaPills[0]);
+    expect(vehicleInput.value).toBe("Force Urbania");
+  }, 20000);
 });

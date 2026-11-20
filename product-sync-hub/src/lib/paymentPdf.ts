@@ -38,7 +38,7 @@ export function resolveCompanyProfile(
     ).trim();
     return {
       name: name || "Trip Flow Travel Agency",
-      logo: companyParam.logo || cachedLogo || localData.company_logo || "",
+      logo: companyParam.logo || localData.company_logo || cachedLogo || "",
       phone:
         companyParam.phone ||
         localData.company_phone ||
@@ -65,7 +65,7 @@ export function resolveCompanyProfile(
 
   return {
     name: name || "Trip Flow Travel Agency",
-    logo: cachedLogo || localData.company_logo || "",
+    logo: localData.company_logo || cachedLogo || "",
     phone: localData.company_phone || "+91 98765 43210",
     email: localData.company_email || "support@travelagency.com",
     address: localData.company_address || "Jammu & Kashmir, India",

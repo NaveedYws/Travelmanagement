@@ -73,7 +73,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { SavedQuotation } from "@/lib/types";
-import { getRecentQuotations, getStoredQuotations, QUOTATIONS_UPDATED_EVENT } from "@/lib/quotationStorage";
+import {
+  getRecentQuotations,
+  getStoredQuotations,
+  fetchQuotationsFromDb,
+  QUOTATIONS_UPDATED_EVENT,
+} from "@/lib/quotationStorage";
 
 const CATEGORY_CONFIG = {
   travel: { label: "Manage Packages", icon: Layers, itemName: "package", plural: "Packages", businessLabel: "Travel Agency & CRM" },
@@ -107,7 +112,7 @@ export function Dashboard() {
   const [dateFilter, setDateFilter] = useState<"today" | "7days" | "30days" | "month">("today");
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
   const [isUpdatingPass, setIsUpdatingPass] = useState(false);
-  const [recentQuotations, setRecentQuotations] = useState<SavedQuotation[]>(() => getRecentQuotations(10));
+  const [recentQuotations, setRecentQuotations] = useState<SavedQuotation[]>(() => getRecentQuotations(5));
   const [storedQuotationsCount, setStoredQuotationsCount] = useState<number>(() => getStoredQuotations().length);
   const [recordedPaymentsCount, setRecordedPaymentsCount] = useState<number>(
     () => getStoredQuotations().filter((q) => q.paymentRecorded === true).length
@@ -118,10 +123,15 @@ export function Dashboard() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
 
+  // Sync quotations from Database across devices & listen to local updates
+  useEffect(() => {
+    fetchQuotationsFromDb().catch(() => {});
+  }, [user?.id]);
+
   useEffect(() => {
     const refreshQuotations = () => {
       const stored = getStoredQuotations();
-      setRecentQuotations(stored.slice(0, 10));
+      setRecentQuotations(stored.slice(0, 5));
       setStoredQuotationsCount(stored.length);
       setRecordedPaymentsCount(stored.filter((q) => q.paymentRecorded === true).length);
     };
@@ -289,7 +299,7 @@ export function Dashboard() {
           <div className="space-y-6 sm:space-y-7">
             {/* Scenic Mountain Landscape Hero Banner Matching Image 2 */}
             <div 
-              className="relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_4px_rgba(0,0,0,0.04)] min-h-[200px] flex items-center p-6 sm:p-7 transition-all"
+              className="relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_4px_rgba(0,0,0,0.04)] min-h-[190px] flex items-center p-4 sm:p-6 lg:p-7 transition-all"
               style={{
                 backgroundImage: `url('https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1600&q=80')`,
                 backgroundSize: 'cover',
@@ -297,14 +307,14 @@ export function Dashboard() {
               }}
             >
               {/* Soft frosted gradient overlay so text is crystal clear */}
-              <div className="absolute inset-0 bg-gradient-to-r from-white via-white/90 to-transparent/10 dark:from-[#0B1120] dark:via-[#0B1120]/90 dark:to-transparent/20" />
+              <div className="absolute inset-0 bg-gradient-to-r from-white via-white/95 to-white/70 sm:to-transparent/10 dark:from-[#0B1120] dark:via-[#0B1120]/95 dark:to-[#0B1120]/70 sm:dark:to-transparent/20" />
 
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10 w-full">
-                <div className="space-y-3 max-w-2xl">
+                <div className="space-y-3 max-w-2xl min-w-0">
                   {/* Friendly Welcome Pill */}
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50/90 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/60 shadow-2xs">
-                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Welcome back, {userPrefix}</span>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50/90 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/60 shadow-2xs max-w-full">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="truncate max-w-[220px] sm:max-w-none">Welcome back, {userPrefix}</span>
                   </div>
 
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
@@ -320,7 +330,7 @@ export function Dashboard() {
                     <button
                       onClick={() => setDateFilter("today")}
                       className={cn(
-                        "text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer",
+                        "text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-all cursor-pointer",
                         dateFilter === "today"
                           ? "bg-blue-600 text-white shadow-xs"
                           : "bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 border border-slate-200/70 dark:border-slate-700"
@@ -331,7 +341,7 @@ export function Dashboard() {
                     <button
                       onClick={() => setDateFilter("7days")}
                       className={cn(
-                        "text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer",
+                        "text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-all cursor-pointer",
                         dateFilter === "7days"
                           ? "bg-blue-600 text-white shadow-xs"
                           : "bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 border border-slate-200/70 dark:border-slate-700"
@@ -342,7 +352,7 @@ export function Dashboard() {
                     <button
                       onClick={() => setDateFilter("30days")}
                       className={cn(
-                        "text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer",
+                        "text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-all cursor-pointer",
                         dateFilter === "30days"
                           ? "bg-blue-600 text-white shadow-xs"
                           : "bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 border border-slate-200/70 dark:border-slate-700"
@@ -353,7 +363,7 @@ export function Dashboard() {
                     <button
                       onClick={() => setDateFilter("month")}
                       className={cn(
-                        "text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer",
+                        "text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg transition-all cursor-pointer",
                         dateFilter === "month"
                           ? "bg-blue-600 text-white shadow-xs"
                           : "bg-white/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 border border-slate-200/70 dark:border-slate-700"
@@ -364,31 +374,23 @@ export function Dashboard() {
                   </div>
                 </div>
 
-                {/* Primary Action Buttons */}
-                <div className="shrink-0 self-start lg:self-center flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setActiveView("last-quotations")}
-                    className="h-10 px-3.5 rounded-xl border border-slate-200/90 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 text-slate-800 dark:text-slate-200 text-xs font-bold gap-2 shadow-xs hover:bg-white dark:hover:bg-slate-800 transition-all flex items-center cursor-pointer"
-                  >
-                    <FileText className="w-4 h-4 text-blue-600" />
-                    <span>Last 10 Quotations</span>
-                  </button>
-
+                {/* Primary Action Buttons - Responsive without overflowing */}
+                <div className="w-full sm:w-auto flex flex-wrap sm:flex-nowrap items-center gap-2.5 pt-1 lg:pt-0">
                   <ItineraryMaker
+                    className="flex-1 sm:flex-none"
                     trigger={
-                      <button className="h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold gap-2 shadow-md shadow-blue-500/25 transition-all flex items-center cursor-pointer">
-                        <Plus className="w-4 h-4" />
-                        <span>Create Quotation</span>
+                      <button className="w-full sm:w-auto h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold gap-2 shadow-md shadow-blue-500/25 transition-all flex items-center justify-center cursor-pointer">
+                        <Plus className="w-4 h-4 shrink-0" />
+                        <span className="whitespace-nowrap">Create Quotation</span>
                       </button>
                     }
                   />
                   <TravelPackageForm 
                     onSubmit={handleAdd} 
                     trigger={
-                      <button className="h-10 px-4 rounded-xl bg-[#0F172A] hover:bg-black text-white dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 text-xs font-bold gap-2 shadow-md transition-all flex items-center cursor-pointer">
-                        <Plus className="w-4 h-4" />
-                        <span>Add Package</span>
+                      <button className="w-full sm:w-auto h-10 px-4 rounded-xl bg-[#0F172A] hover:bg-black text-white dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 text-xs font-bold gap-2 shadow-md transition-all flex items-center justify-center cursor-pointer">
+                        <Plus className="w-4 h-4 shrink-0" />
+                        <span className="whitespace-nowrap">Add Package</span>
                       </button>
                     } 
                   />
@@ -397,31 +399,31 @@ export function Dashboard() {
             </div>
 
             {/* 5 Bento Metric Stat Cards Matching Image 2 */}
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 sm:gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
               {/* Card 1: Total Packages (Blue Cube) */}
               <div 
                 onClick={() => setActiveView("manage")}
-                className="bg-white dark:bg-[#0e131f] p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+                className="bg-white dark:bg-[#0e131f] p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/60 flex items-center justify-center">
-                      <Package className="w-5 h-5" />
+                  <div className="flex items-center justify-between mb-2.5 sm:mb-3">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/60 flex items-center justify-center">
+                      <Package className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:translate-x-0.5 transition-transform" />
                   </div>
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
+                  <span className="text-[11px] sm:text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1 truncate">
                     Total Packages
                   </span>
-                  <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums truncate">
                     {products.length}
                   </div>
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
-                  <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <span className="text-sm leading-none">↗</span> Active in catalog
+                <div className="mt-2.5 sm:mt-3 pt-2 sm:pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-0.5 sm:space-y-1">
+                  <div className="text-[11px] sm:text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 truncate">
+                    <span className="text-xs sm:text-sm leading-none">↗</span> Active in catalog
                   </div>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                  <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 font-medium truncate">
                     {products.length > 0 ? `${products.length} listed` : "Catalog empty"}
                   </p>
                 </div>
@@ -430,27 +432,27 @@ export function Dashboard() {
               {/* Card 2: Articles & Stories (Green Document) */}
               <div 
                 onClick={() => setActiveView("blogs")}
-                className="bg-white dark:bg-[#0e131f] p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+                className="bg-white dark:bg-[#0e131f] p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/60 flex items-center justify-center">
-                      <FileText className="w-5 h-5" />
+                  <div className="flex items-center justify-between mb-2.5 sm:mb-3">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/60 flex items-center justify-center">
+                      <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:translate-x-0.5 transition-transform" />
                   </div>
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
+                  <span className="text-[11px] sm:text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1 truncate">
                     Articles & Stories
                   </span>
-                  <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums truncate">
                     {blogs.length}
                   </div>
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
-                  <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Published • SEO
+                <div className="mt-2.5 sm:mt-3 pt-2 sm:pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-0.5 sm:space-y-1">
+                  <div className="text-[11px] sm:text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" /> Published • SEO
                   </div>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                  <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 font-medium truncate">
                     {blogs.length > 0 ? `${blogs.length} live posts` : "No articles yet"}
                   </p>
                 </div>
@@ -459,79 +461,79 @@ export function Dashboard() {
               {/* Card 3: Active Inquiries (Purple Chat Bubble) */}
               <div 
                 onClick={() => setActiveView("inquiries")}
-                className="bg-white dark:bg-[#0e131f] p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
+                className="bg-white dark:bg-[#0e131f] p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/60 flex items-center justify-center">
-                      <MessageSquare className="w-5 h-5" />
+                  <div className="flex items-center justify-between mb-2.5 sm:mb-3">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-900/60 flex items-center justify-center">
+                      <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:translate-x-0.5 transition-transform" />
                   </div>
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
+                  <span className="text-[11px] sm:text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1 truncate">
                     Active Inquiries
                   </span>
-                  <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums truncate">
                     {inquiriesLoading ? "…" : activeInquiryCount}
                   </div>
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
-                  <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> {activeInquiryCount > 0 ? `${activeInquiryCount} awaiting reply` : "All caught up"}
+                <div className="mt-2.5 sm:mt-3 pt-2 sm:pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-0.5 sm:space-y-1">
+                  <div className="text-[11px] sm:text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" /> {activeInquiryCount > 0 ? `${activeInquiryCount} awaiting reply` : "All caught up"}
                   </div>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                  <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 font-medium truncate">
                     {activeInquiryCount > 0 ? "Requires action" : "No pending inquiries"}
                   </p>
                 </div>
               </div>
 
               {/* Card 4: Catalog Value (Peach/Amber Currency) */}
-              <div className="bg-white dark:bg-[#0e131f] p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 group flex flex-col justify-between">
+              <div className="bg-white dark:bg-[#0e131f] p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 group flex flex-col justify-between">
                 <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/60 flex items-center justify-center">
-                      <DollarSign className="w-5 h-5" />
+                  <div className="flex items-center justify-between mb-2.5 sm:mb-3">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/60 flex items-center justify-center">
+                      <DollarSign className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600" />
                   </div>
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
+                  <span className="text-[11px] sm:text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1 truncate">
                     Catalog Value
                   </span>
-                  <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums truncate">
                     ₹{stats.totalValue.toLocaleString()}
                   </div>
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
-                  <div className="text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500" /> Combined tour catalog
+                <div className="mt-2.5 sm:mt-3 pt-2 sm:pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-0.5 sm:space-y-1">
+                  <div className="text-[11px] sm:text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" /> Combined tour catalog
                   </div>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                  <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 font-medium truncate">
                     {products.length > 0 ? `Across ${products.length} packages` : "No packages added"}
                   </p>
                 </div>
               </div>
 
               {/* Card 5: Average Listing Price (Pink Trending) - Spans 2 cols on mobile */}
-              <div className="bg-white dark:bg-[#0e131f] p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 group flex flex-col justify-between col-span-2 sm:col-span-2 lg:col-span-1 xl:col-span-1">
+              <div className="bg-white dark:bg-[#0e131f] p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 group flex flex-col justify-between col-span-2 sm:col-span-2 lg:col-span-1 xl:col-span-1">
                 <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="w-10 h-10 rounded-xl bg-pink-50 dark:bg-pink-950/60 text-pink-600 dark:text-pink-400 border border-pink-100 dark:border-pink-900/60 flex items-center justify-center">
-                      <TrendingUp className="w-5 h-5" />
+                  <div className="flex items-center justify-between mb-2.5 sm:mb-3">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-pink-50 dark:bg-pink-950/60 text-pink-600 dark:text-pink-400 border border-pink-100 dark:border-pink-900/60 flex items-center justify-center">
+                      <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600" />
                   </div>
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">
+                  <span className="text-[11px] sm:text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1 truncate">
                     Average Listing Price
                   </span>
-                  <div className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight tabular-nums truncate">
                     ₹{stats.avgPrice.toLocaleString()}
                   </div>
                 </div>
-                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-1">
-                  <div className="text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500" /> Across active packages
+                <div className="mt-2.5 sm:mt-3 pt-2 sm:pt-2.5 border-t border-slate-100 dark:border-slate-800/80 space-y-0.5 sm:space-y-1">
+                  <div className="text-[11px] sm:text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1.5 truncate">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0" /> Across active packages
                   </div>
-                  <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                  <p className="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 font-medium truncate">
                     {products.length > 0 ? `Calculated from catalog` : "No packages added"}
                   </p>
                 </div>
@@ -712,7 +714,7 @@ export function Dashboard() {
                   Manage active catalog listings, live pricing, durations, and headless endpoints
                 </p>
               </div>
-              <div className="shrink-0 flex items-center gap-2.5">
+              <div className="shrink-0 flex items-center gap-2.5 flex-wrap">
                 <BulkImport onImport={handleBulkImport} itemName={config.itemName} />
                 {businessType === "hotel" ? (
                   <HotelForm onSubmit={handleAdd} />
@@ -998,7 +1000,7 @@ export function Dashboard() {
 
         {/* Categorized Navigation */}
         <nav className="flex-1 px-3 py-3 space-y-4 overflow-y-auto">
-          {/* WORKSPACE: Last 10 Quotations (Dedicated Page, Not inside sidebar list) */}
+          {/* WORKSPACE: Last 5 Quotations (Dedicated Page, Not inside sidebar list) */}
           <div className="space-y-1">
             <span className="px-3 text-[10px] font-bold text-slate-400 tracking-wider uppercase">
               WORKSPACE
@@ -1019,7 +1021,7 @@ export function Dashboard() {
               >
                 <div className="flex items-center gap-2.5">
                   <FileText className="w-4 h-4 text-blue-400" />
-                  <span>Last 10 Quotations</span>
+                  <span>Last 5 Quotations</span>
                 </div>
                 <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 font-bold">
                   {recentQuotations.length}
@@ -1097,11 +1099,11 @@ export function Dashboard() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Modern Navbar Matching Image 2 */}
         <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#070a10]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 transition-colors">
-          <div className="h-16 flex items-center justify-between px-4 sm:px-6">
-            <div className="flex items-center gap-3 flex-1 max-w-xl">
+          <div className="h-16 flex items-center justify-between px-3 sm:px-6 gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 max-w-xl">
               <button 
                 onClick={() => setSidebarOpen(true)} 
-                className="lg:hidden p-1.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                className="lg:hidden p-1.5 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer shrink-0"
                 aria-label="Open navigation"
               >
                 <Menu className="w-5 h-5" />
@@ -1127,7 +1129,7 @@ export function Dashboard() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
               {/* Mobile Search Button */}
               <button
                 type="button"
@@ -1143,7 +1145,7 @@ export function Dashboard() {
               </button>
 
               {/* Live Sync Pill Matching Image 2 */}
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shrink-0">
+              <div className="hidden xs:flex sm:flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shrink-0">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 <span>Live Sync</span>
               </div>
@@ -1155,7 +1157,7 @@ export function Dashboard() {
               <button 
                 onClick={() => setActiveView("inquiries")} 
                 title="Notifications" 
-                className="w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-center text-slate-600 dark:text-slate-300 relative hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                className="w-8 h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-center text-slate-600 dark:text-slate-300 relative hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer shrink-0"
               >
                 <Bell className="w-4 h-4" />
                 {activeInquiryCount > 0 && (
@@ -1164,7 +1166,7 @@ export function Dashboard() {
               </button>
 
               {/* User Profile Pill Matching Image 2 */}
-              <div className="flex items-center gap-2 pl-1 cursor-pointer" onClick={() => setActiveView("settings")}>
+              <div className="flex items-center gap-2 pl-0.5 sm:pl-1 cursor-pointer shrink-0" onClick={() => setActiveView("settings")}>
                 <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs shadow-xs">
                   {userInitial}
                 </div>
@@ -1206,7 +1208,7 @@ export function Dashboard() {
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-slate-50/60 dark:bg-[#070a10] transition-colors">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 bg-slate-50/60 dark:bg-[#070a10] transition-colors">
           <div className="max-w-7xl mx-auto">
             {renderContent()}
           </div>
