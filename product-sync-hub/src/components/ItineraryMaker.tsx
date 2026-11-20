@@ -256,6 +256,7 @@ export function ItineraryMaker({
   const [newDayImageUrl, setNewDayImageUrl] = useState("");
   const [newDayHighlights, setNewDayHighlights] = useState("");
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const dayFormRef = useRef<HTMLDivElement>(null);
 
   // Pre-fed Destination Itineraries Library
   const [destLibrary, setDestLibrary] = useState<DestinationItem[]>([]);
@@ -928,9 +929,7 @@ export function ItineraryMaker({
         title: newDayTitle.trim(),
         activities: newDayDescription.trim() || newDayTitle.trim(),
         description: newDayDescription.trim(),
-        highlights: newDayDescription
-          ? newDayDescription.split(/[\n,;•]+/).map((h) => h.trim().replace(/^[-*•]\s*/, "")).filter(Boolean)
-          : updated[editingDayIndex].highlights,
+        highlights: undefined,
         images: newDayImageUrl ? [newDayImageUrl] : updated[editingDayIndex].images || [],
       };
       setDays(updated);
@@ -943,9 +942,7 @@ export function ItineraryMaker({
         title: newDayTitle.trim(),
         activities: newDayDescription.trim() || newDayTitle.trim(),
         description: newDayDescription.trim(),
-        highlights: newDayDescription
-          ? newDayDescription.split(/[\n,;•]+/).map((h) => h.trim().replace(/^[-*•]\s*/, "")).filter(Boolean)
-          : undefined,
+        highlights: undefined,
         images: newDayImageUrl ? [newDayImageUrl] : [],
       };
       setDays([...days, newDay]);
@@ -994,6 +991,11 @@ export function ItineraryMaker({
     setNewDayHighlights(d.highlights?.join(", ") || (d.activities && d.activities !== d.title ? d.activities : ""));
     setNewDayImageUrl(d.images[0] || "");
     setSectionsOpen((p) => ({ ...p, itinerary: true }));
+
+    // Auto scroll smoothly to the day edit form
+    setTimeout(() => {
+      dayFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
   };
 
   const handleRemoveDay = (idx: number) => {
@@ -2326,7 +2328,7 @@ Thank you for choosing ${user?.company_name || "us"}!`;
               {sectionsOpen.itinerary && (
                 <div className="p-4 sm:p-6 border-t border-slate-100 space-y-6">
                   {/* Form to add or edit a day */}
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5 space-y-4">
+                  <div ref={dayFormRef} className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 sm:p-5 space-y-4 scroll-mt-6">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
                         {editingDayIndex !== null ? `Edit Day ${newDayNumber}` : "+ Add Day Itinerary"}
@@ -2645,15 +2647,6 @@ Thank you for choosing ${user?.company_name || "us"}!`;
                                   <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
                                     {day.description}
                                   </p>
-                                  {(day.highlights?.length || (day.activities && day.activities !== day.title)) && (
-                                    <div className="flex items-center gap-1 text-[11px] text-slate-500 pt-0.5">
-                                      <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                      <span className="font-semibold text-slate-700">Highlights:</span>
-                                      <span className="truncate">
-                                        {day.highlights?.join(", ") || day.activities}
-                                      </span>
-                                    </div>
-                                  )}
                                 </div>
 
                                 {day.images?.[0] && (

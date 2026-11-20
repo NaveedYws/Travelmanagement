@@ -217,9 +217,215 @@ describe("ItineraryPdfDocument uniform text sizes", () => {
       clientNotes: sampleData.clientNotes,
     });
 
-    // Page 1 has hotels & transports; Page 2 packs Days 1-5 cleanly instead of leaving a large gap after Day 4
-    expect(pages[1].days?.list.map((d) => d.day)).toEqual([1, 2, 3, 4, 5]);
+    // With 2 hotels & transport, Page 1 continues displaying Day 1 in the available space
+    expect(pages[0].hotels).toBeDefined();
+    expect(pages[0].transports).toBeDefined();
+    expect(pages[0].days?.list.map((d) => d.day)).toEqual([1]);
+    expect(pages[1].days?.list.map((d) => d.day)).toEqual([2, 3, 4, 5]);
     expect(pages[2].days?.list.map((d) => d.day)).toEqual([6]);
+  });
+
+  it("fills available space on Page 1 with itinerary days when there is only 1 hotel instead of leaving page empty", () => {
+    const pages = planContentPages({
+      activeDays: sampleData.days,
+      activeHotels: [sampleData.hotels[0]],
+      activeTransports: sampleData.transports,
+      activeActivities: [],
+      effectiveInclusions: sampleData.inclusions,
+      effectiveExclusions: sampleData.exclusions,
+      hasPaymentDetails: true,
+      clientNotes: sampleData.clientNotes,
+    });
+
+    // Page 1 has 1 hotel, transport, and continues displaying Day 1 in the available space
+    expect(pages[0].hotels?.list.length).toBe(1);
+    expect(pages[0].transports?.list.length).toBe(1);
+    expect(pages[0].days?.list.map((d) => d.day)).toEqual([1]);
+    expect(pages[1].days?.list.map((d) => d.day)).toEqual([2, 3, 4, 5]);
+    expect(pages[2].days?.list.map((d) => d.day)).toEqual([6]);
+  });
+
+  it("never overflows Day 6 into the footer when days have detailed titles and bullets (as in Leh Ladakh screenshot)", () => {
+    const lehDays = [
+      makeDay(1, "Arrival in Leh & Acclimatization", [
+        "Welcome to Leh. Meet our representative at Leh Airport.",
+        "Transfer to the hotel and check in.",
+        "Complete rest recommended for high altitude acclimatization.",
+        "Evening leisurely walk in Leh market.",
+      ]),
+      makeDay(2, "Leh Local Sightseeing & Sham Valley", [
+        "After breakfast, visit Hall of Fame and Spituk Gompa.",
+        "Witness the confluence of Indus and Zanskar rivers at Sangam.",
+        "Experience the gravity-defying Magnetic Hill.",
+        "Visit Gurudwara Pathar Sahib.",
+      ]),
+      makeDay(3, "Leh to Nubra Valley via Khardung La Pass", [
+        "Drive to Nubra Valley passing Khardung La, one of the world's highest motorable passes.",
+        "Enjoy panoramic views of snow-capped peaks.",
+        "Visit Diskit Monastery and the Maitreya Buddha statue.",
+        "Enjoy double-humped camel ride at Hunder Sand Dunes.",
+      ]),
+      makeDay(4, "Nubra Valley to Pangong Tso via Shyok River", [
+        "Drive towards Pangong Lake via scenic Shyok Valley route.",
+        "Witness stunning high-altitude river landscapes.",
+        "Be mesmerized by the deep blue lake that changes shades throughout the day.",
+        "Overnight stay in luxury lakeside camps.",
+      ]),
+      makeDay(5, "Pangong Tso Sunrise & Return to Leh via Chang La Pass", [
+        "Witness an unforgettable sunrise over Pangong Lake.",
+        "Drive back to Leh crossing the high Chang La Pass (17,590 ft).",
+        "En route visit the historic Thiksey Monastery and Shey Palace.",
+      ]),
+      makeDay(6, "Departure from Leh Airport with Unforgettable Memories", [
+        "Early morning transfer to Leh Airport.",
+        "Board your return flight with memories of the magical landscapes and monasteries of Leh Ladakh.",
+      ]),
+    ];
+
+    const pages = planContentPages({
+      activeDays: lehDays,
+      activeHotels: [
+        {
+          hotelName: "Grand Dragon Leh",
+          location: "Leh",
+          checkIn: "2026-06-10",
+          checkOut: "2026-06-16",
+          roomCategory: "Deluxe Room",
+          mealPlan: "MAP",
+          nights: 6,
+          rooms: 1,
+        },
+      ],
+      activeTransports: [
+        {
+          vehicleType: "Innova Crysta",
+          pickupTime: "10:00 AM",
+          route: "All Transfers as per itinerary",
+          inclusions: ["Fuel", "Driver Allowance", "Tolls"],
+          vehiclesCount: 1,
+        },
+      ],
+      activeActivities: [],
+      effectiveInclusions: ["Breakfast & Dinner", "Airport Transfers"],
+      effectiveExclusions: ["Personal Expenses"],
+      hasPaymentDetails: true,
+      clientNotes: "",
+    });
+
+    // Page 1 holds the hotel, transport, and fits Day 1
+    expect(pages[0].hotels?.list.length).toBe(1);
+    expect(pages[0].days?.list.map((d) => d.day)).toEqual([1]);
+
+    // Page 2 must NEVER pack Day 6 onto Page 2 because that would overflow into the footer!
+    // Page 2 cleanly holds Days 2, 3, 4, 5
+    expect(pages[1].days?.list.map((d) => d.day)).toEqual([2, 3, 4, 5]);
+    expect(pages[1].days?.list.includes(6)).toBe(false);
+
+    // Day 6 is cleanly and safely placed on Page 3 with Inclusions
+    expect(pages[2].days?.list.map((d) => d.day)).toEqual([6]);
+    expect(pages[2].inclusionsExclusions).toBeDefined();
+  });
+
+  it("packs up to Day 5 cleanly on Page 2 without leaving empty space when multiple hotels fill Page 1", () => {
+    const lehDays = [
+      makeDay(1, "Arrival in Leh & Acclimatization", [
+        "Welcome to Leh. Meet our representative at Leh Airport.",
+        "Transfer to the hotel and check in.",
+        "Complete rest recommended for high altitude acclimatization.",
+        "Evening leisurely walk in Leh market.",
+      ]),
+      makeDay(2, "Leh Local Sightseeing & Sham Valley", [
+        "After breakfast, visit Hall of Fame and Spituk Gompa.",
+        "Witness the confluence of Indus and Zanskar rivers at Sangam.",
+        "Experience the gravity-defying Magnetic Hill.",
+        "Visit Gurudwara Pathar Sahib.",
+      ]),
+      makeDay(3, "Leh to Nubra Valley via Khardung La Pass", [
+        "Drive to Nubra Valley passing Khardung La, one of the world's highest motorable passes.",
+        "Enjoy panoramic views of snow-capped peaks.",
+        "Visit Diskit Monastery and the Maitreya Buddha statue.",
+        "Enjoy double-humped camel ride at Hunder Sand Dunes.",
+      ]),
+      makeDay(4, "Nubra Valley to Azure Pangong Lake via Shyok River", [
+        "Drive towards Pangong Lake via scenic Shyok Valley route.",
+        "Witness stunning high-altitude river landscapes.",
+        "Be mesmerized by the deep blue lake that changes shades throughout the day.",
+        "Overnight stay in luxury lakeside camps.",
+      ]),
+      makeDay(5, "Pangong Tso Sunrise & Return to Leh via Chang La Pass", [
+        "Witness an unforgettable sunrise over Pangong Lake.",
+        "Drive back to Leh crossing the high Chang La Pass (17,590 ft).",
+        "En route visit the historic Thiksey Monastery and Shey Palace.",
+      ]),
+      makeDay(6, "Departure from Leh Airport with Unforgettable Memories", [
+        "Early morning transfer to Leh Airport.",
+        "Board your return flight with memories of the magical landscapes and monasteries of Leh Ladakh.",
+      ]),
+    ];
+
+    const threeHotels = [
+      {
+        hotelName: "Grand Dragon Leh",
+        location: "Leh",
+        checkIn: "2026-06-10",
+        checkOut: "2026-06-12",
+        roomCategory: "Deluxe Room",
+        mealPlan: "MAP",
+        nights: 2,
+        rooms: 1,
+      },
+      {
+        hotelName: "Nubra Organic Retreat",
+        location: "Hunder",
+        checkIn: "2026-06-12",
+        checkOut: "2026-06-14",
+        roomCategory: "Luxury Tent",
+        mealPlan: "MAP",
+        nights: 2,
+        rooms: 1,
+      },
+      {
+        hotelName: "Pangong Deluxe Camp",
+        location: "Spangmik",
+        checkIn: "2026-06-14",
+        checkOut: "2026-06-16",
+        roomCategory: "Cottage",
+        mealPlan: "MAP",
+        nights: 2,
+        rooms: 1,
+      },
+    ];
+
+    const pages = planContentPages({
+      activeDays: lehDays,
+      activeHotels: threeHotels,
+      activeTransports: [
+        {
+          vehicleType: "Innova Crysta",
+          pickupTime: "10:00 AM",
+          route: "All Transfers as per itinerary",
+          inclusions: ["Fuel", "Driver Allowance", "Tolls"],
+          vehiclesCount: 1,
+        },
+      ],
+      activeActivities: [],
+      effectiveInclusions: ["Breakfast & Dinner", "Airport Transfers"],
+      effectiveExclusions: ["Personal Expenses"],
+      hasPaymentDetails: true,
+      clientNotes: "",
+    });
+
+    // Page 1 holds the hotels & transports
+    expect(pages[0].hotels?.list.length).toBe(3);
+    expect(pages[0].transports?.list.length).toBe(1);
+
+    // Page 2 holds Days 1 through 5 seamlessly (Day 5 adjusts easily onto Page 2)
+    expect(pages[1].days?.list.map((d) => d.day)).toEqual([1, 2, 3, 4, 5]);
+
+    // Page 3 cleanly holds Day 6 along with Inclusions, Exclusions & Payment
+    expect(pages[2].days?.list.map((d) => d.day)).toEqual([6]);
+    expect(pages[2].inclusionsExclusions).toBeDefined();
+    expect(pages[2].payment).toBeDefined();
   });
 
   it("starts day-wise itinerary on the same page following transport instead of dropping the rest of the page", () => {

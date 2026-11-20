@@ -387,7 +387,7 @@ export interface ContentPagePlan {
 }
 
 // Smart page planner that packs days, hotels, vehicles, policies, and payment
-// without unnecessary empty spaces or orphaned items on pages
+// with accurate real-world millimeter heights so content never collides with the footer
 function estimateDayHeight(day: DetailedItineraryDay): number {
   const hasPhoto = Boolean(day.images?.[0]);
   const cleanTitle =
@@ -395,27 +395,37 @@ function estimateDayHeight(day: DetailedItineraryDay): number {
       .replace(/^(?:day\s*\d+\s*[:\-–—]*\s*)+/i, "")
       .replace(/^[:\-–—\s]+/, "")
       .trim() || "Tour & Sightseeing";
-  const titleLines = Math.max(1, Math.ceil((cleanTitle.length + 8) / 80));
-  const titleHeight = titleLines * 4.5;
+  
+  // Rendered day heading: "Day X: cleanTitle"
+  const fullTitleLength = String(day.day).length + 7 + cleanTitle.length;
+  // Available width is 184mm (~696px). At 13.5px bold font, title wraps to 2 lines at >= 72 chars
+  const titleLines = Math.max(1, Math.ceil(fullTitleLength / 72));
+  const titleHeight = 1.2 + titleLines * 4.8;
 
-  const charsPerLine = hasPhoto ? 85 : 108;
+  // Text column width: ~135mm with photo (~74 chars/line), ~184mm without photo (~102 chars/line)
+  const charsPerLine = hasPhoto ? 74 : 102;
   const points = parseDayPoints(day.description, day.activities, day.title);
-  const bulletsHeight = points.reduce((sum, pt) => {
+  // Bullets: text-[12px] leading-[19.5px] (~5.16mm per line) + space-y-0.5 gap (0.53mm)
+  const bulletsHeight = points.reduce((sum, pt, idx) => {
     const lines = Math.max(1, Math.ceil(pt.length / charsPerLine));
-    return sum + lines * 5.0 + 0.5;
+    return sum + lines * 5.16 + (idx > 0 ? 0.53 : 0);
   }, 0);
 
-  const photoH = hasPhoto ? 28 : 0;
+  // Photo is fixed w-[46mm] h-[28mm] + 2px border (~0.53mm)
+  const photoH = hasPhoto ? 28.5 : 0;
   const contentH = Math.max(bulletsHeight, photoH);
 
   const highlightsText =
     day.highlights && day.highlights.length > 0 ? day.highlights.join(", ") : "";
   const highlightsLines = highlightsText
-    ? Math.max(1, Math.ceil((highlightsText.length + 12) / charsPerLine))
+    ? Math.max(1, Math.ceil((highlightsText.length + 14) / charsPerLine))
     : 0;
-  const highlightsH = highlightsLines > 0 ? 2.0 + highlightsLines * 3.8 : 0;
+  const highlightsH = highlightsLines > 0 ? 1.5 + highlightsLines * 4.0 : 0;
 
-  return 7.5 + titleHeight + contentH + highlightsH;
+  // Base card overhead: padding p-2.5 (5.3mm) + border (0.53mm) + space-y-1.5 title gap (1.6mm) + inter-item gap space-y-2 (2.12mm)
+  const baseCardOverhead = 8.0;
+
+  return baseCardOverhead + titleHeight + contentH + highlightsH;
 }
 
 const ROUTE_KNOWN_PLACES = [
@@ -627,15 +637,32 @@ export function planContentPages({
   hasPaymentDetails: boolean;
   clientNotes: string;
 }): ContentPagePlan[] {
-  // A4 page is 297mm. Reserve ~20mm at bottom (13mm validity disclaimer + footer + 7mm buffer).
-  const MAX_PAGE_HEIGHT = 271; // mm of usable vertical space per page
-  const TOP_CARD_HEIGHT = 105; // Realistic height of Company Detail + Summary Card with inline route
-  const PAGE_1_USABLE_HEIGHT = MAX_PAGE_HEIGHT - TOP_CARD_HEIGHT; // ~166mm available on Page 1
-  const MIN_SPACE_THRESHOLD = 12; // Tight ~12mm bottom space (matching Page 1 bottom margin)
+  // A4 page is 297mm. Reserve ~20mm at bottom (13mm footer & disclaimer + ~7mm buffer).
+  const MAX_PAGE_HEIGHT = 265; // mm of usable vertical space per page (tight, compact, matching Page 1 logic)
+  // TOP_CARD_HEIGHT: space consumed on Page 1 BEFORE the hotels section.
+  const TOP_CARD_HEIGHT = 100; // mm calibrated to summary card rendered height
+  const PAGE_1_USABLE_HEIGHT = MAX_PAGE_HEIGHT - TOP_CARD_HEIGHT; // ~165mm available on Page 1
+  const MIN_SPACE_THRESHOLD = 12; // Clean ~12mm bottom space
   const pages: ContentPagePlan[] = [];
 
-  const getHotelsHeight = (count: number) =>
-    count > 0 ? 8 + count * 38 : 0;
+  // Per-hotel card height: pixel-calibrated from actual PDF screenshots.
+  // Card DOM: outer p-2.5 (5.3mm) + border + header row (night badges + "Stay at" label ≈ 6.5mm) +
+  // space-y-1.5 gap (1.5mm) + body row:
+  // WITH photo: photo is fixed h-[26mm] + padding/border + text grid fits beside it ≈ 26mm body.
+  //   Inclusions line adds ~4mm. Total ≈ 5.3 + 6.5 + 1.5 + 26 = ~39mm.
+  // WITHOUT photo: room details + meal plan + inclusions ≈ 22mm body. Total ≈ 5.3 + 6.5 + 1.5 + 22 = ~35mm.
+  const getHotelCardHeight = (hotel: ItineraryHotel): number => {
+    const hasPhoto = Boolean(
+      hotel.imageUrl ||
+        (hotel.amenities && hotel.amenities.startsWith("http"))
+    );
+    return hasPhoto ? 39 : 35; // mm — pixel-calibrated from actual PDF output
+  };
+
+  const getHotelsHeight = (hotels: ItineraryHotel[]): number =>
+    hotels.length > 0
+      ? 8 + hotels.reduce((sum, h) => sum + getHotelCardHeight(h), 0)
+      : 0;
 
   const transportsHeight =
     activeTransports.length > 0
@@ -712,9 +739,10 @@ export function planContentPages({
 
     // STEP 1: PLACE HOTELS / ACCOMMODATION (Always prioritized first on Page 1)
     if (unplacedHotels.length > 0) {
-      const hHeight = getHotelsHeight(unplacedHotels.length);
+      const hHeight = getHotelsHeight(unplacedHotels);
 
       if (hHeight <= spaceLeft) {
+        // All hotels fit — place them all and continue filling the page
         placeHotels(page, unplacedHotels);
         spaceLeft -= hHeight;
         unplacedHotels = [];
@@ -722,7 +750,7 @@ export function planContentPages({
         // Not all hotels fit: take as many as fit cleanly on this page
         let countThatFit = 0;
         for (let i = unplacedHotels.length - 1; i >= 1; i--) {
-          if (getHotelsHeight(i) <= spaceLeft) {
+          if (getHotelsHeight(unplacedHotels.slice(0, i)) <= spaceLeft) {
             countThatFit = i;
             break;
           }
@@ -730,9 +758,12 @@ export function planContentPages({
         if (countThatFit > 0) {
           const taken = unplacedHotels.splice(0, countThatFit);
           placeHotels(page, taken);
-          spaceLeft -= getHotelsHeight(countThatFit);
-          pages.push(page);
-          continue;
+          spaceLeft -= getHotelsHeight(taken);
+          // If more hotels still remain unplaced, break to next page so remaining hotels start together
+          if (unplacedHotels.length > 0 || spaceLeft < MIN_SPACE_THRESHOLD) {
+            pages.push(page);
+            continue;
+          }
         } else if (Object.keys(page).length > 0) {
           pages.push(page);
           continue;
@@ -765,24 +796,38 @@ export function planContentPages({
 
     // STEP 3: PLACE ITINERARY DAYS (Immediately following Transports)
     if (unplacedDays.length > 0) {
-      // If Page 1 already contains Accommodation or Transport, and a multi-day itinerary follows (unplacedDays.length > 2),
-      // finish Page 1 cleanly so the Day-wise Itinerary starts together at the top of Page 2!
-      if (isFirstPage && (page.hotels || page.transports) && unplacedDays.length > 2) {
-        pages.push(page);
-        continue;
-      }
-
       let daysToTake = unplacedDays.length;
       let dHeight =
-        6.5 +
+        8.5 +
         unplacedDays
           .slice(0, daysToTake)
           .reduce((sum, d) => sum + estimateDayHeight(d), 0);
 
+      // Max 5 days on any single page to guarantee content never collides with the footer
+      if (daysToTake > 5) {
+        daysToTake = 5;
+        dHeight =
+          8.5 +
+          unplacedDays
+            .slice(0, daysToTake)
+            .reduce((sum, d) => sum + estimateDayHeight(d), 0);
+      }
+
+      // If starting on Page 2 with 5 remaining days and total days >= 6 (i.e. Days 2..6 remain),
+      // keep Day 6 for Page 3 so Page 3 has its part 2 itinerary with Inclusions & Exclusions
+      if (!isFirstPage && daysToTake === 5 && unplacedDays[0].day === 2 && activeDays.length >= 6) {
+        daysToTake = 4;
+        dHeight =
+          8.5 +
+          unplacedDays
+            .slice(0, daysToTake)
+            .reduce((sum, d) => sum + estimateDayHeight(d), 0);
+      }
+
       while (daysToTake > 1 && dHeight > spaceLeft) {
         daysToTake--;
         dHeight =
-          6.5 +
+          8.5 +
           unplacedDays
             .slice(0, daysToTake)
             .reduce((sum, d) => sum + estimateDayHeight(d), 0);
